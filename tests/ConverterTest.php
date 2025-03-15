@@ -222,11 +222,283 @@ class ConverterTest extends TestCase
         
         // Check for specific warning messages
         $this->assertTrue(in_array('Unknown or unmapped CycloneDX field: unmappedField', $warnings));
-        $this->assertTrue(in_array('Unknown or unmapped CycloneDX field: components', $warnings));
     }
     
     /**
-     * Test ConversionResult with warnings functionality
+     * Test SPDX packages to CycloneDX components conversion
+     */
+    public function testConvertSpdxPackagesToCyclonedxComponents(): void
+    {
+        $converter = new Converter();
+        
+        // Create SPDX input with packages array
+        $spdxJson = json_encode([
+            'spdxVersion' => 'SPDX-2.3',
+            'dataLicense' => 'CC0-1.0',
+            'SPDXID' => 'SPDXRef-DOCUMENT',
+            'name' => 'test-document',
+            'documentNamespace' => 'https://example.com/test',
+            'packages' => [
+                [
+                    'name' => 'package1',
+                    'SPDXID' => 'SPDXRef-Package-1',
+                    'versionInfo' => '1.0.0',
+                    'downloadLocation' => 'https://example.com/package1',
+                    'licenseConcluded' => 'MIT',
+                    'description' => 'Test package 1',
+                    'checksums' => [
+                        [
+                            'algorithm' => 'SHA1',
+                            'checksumValue' => 'a1b2c3d4e5f6'
+                        ],
+                        [
+                            'algorithm' => 'SHA256',
+                            'checksumValue' => '1a2b3c4d5e6f'
+                        ]
+                    ],
+                    'customPackageField' => 'Custom value'
+                ],
+                [
+                    'name' => 'package2',
+                    'SPDXID' => 'SPDXRef-Package-2',
+                    'versionInfo' => '2.0.0',
+                    'licenseDeclared' => 'Apache-2.0',
+                    'packageVerificationCode' => [
+                        'value' => '123456789abcdef'
+                    ]
+                ]
+            ]
+        ]);
+        
+        // Perform conversion
+        $result = $converter->convertSpdxToCyclonedx($spdxJson);
+        
+        // Assert basic result properties
+        $this->assertInstanceOf(ConversionResult::class, $result);
+        $this->assertEquals('CycloneDX', $result->getFormat());
+        
+        // Parse the content
+        $content = json_decode($result->getContent(), true);
+        
+        // Test components array
+        $this->assertArrayHasKey('components', $content);
+        $this->assertIsArray($content['components']);
+        $this->assertCount(2, $content['components']);
+        
+        // Test first component mapping
+        $component1 = $content['components'][0];
+        $this->assertEquals('Package-1', $component1['bom-ref']);
+        $this->assertEquals('package1', $component1['name']);
+        $this->assertEquals('1.0.0', $component1['version']);
+        $this->assertEquals('Test package 1', $component1['description']);
+        
+        // Test license mapping
+        $this->assertArrayHasKey('licenses', $component1);
+        $this->assertEquals('MIT', $component1['licenses'][0]['license']['id']);
+        
+        // Test hash mapping
+        $this->assertArrayHasKey('hashes', $component1);
+        $this->assertCount(2, $component1['hashes']);
+        $this->assertEquals('SHA-1', $component1['hashes'][0]['alg']);
+        $this->assertEquals('a1b2c3d4e5f6', $component1['hashes'][0]['content']);
+        $this->assertEquals('SHA-256', $component1['hashes'][1]['alg']);
+        $this->assertEquals('1a2b3c4d5e6f', $component1['hashes'][1]['content']);
+        
+        // Test second component mapping
+        $component2 = $content['components'][1];
+        $this->assertEquals('Package-2', $component2['bom-ref']);
+        $this->assertEquals('package2', $component2['name']);
+        $this->assertEquals('2.0.0', $component2['version']);
+        
+        // Test verification code mapping to hash
+        $this->assertArrayHasKey('hashes', $component2);
+        $this->assertEquals('SHA1', $component2['hashes'][0]['alg']);
+        $this->assertEquals('123456789abcdef', $component2['hashes'][0]['content']);
+        
+        // Test that warnings were generated for unmapped fields
+        $warnings = $result->getWarnings();
+        $this->assertNotEmpty($warnings);
+        $this->assertTrue(in_array('Unknown or unmapped package field: customPackageField', $warnings));
+    }
+    
+    /**
+     * Test CycloneDX components to SPDX packages conversion
+     */
+    public function testConvertCyclonedxComponentsToSpdxPackages(): void
+    {
+        $converter = new Converter();
+        
+        // Create CycloneDX input with components array
+        $cyclonedxJson = json_encode([
+            'bomFormat' => 'CycloneDX',
+            'specVersion' => '1.4',
+            'version' => 1,
+            'serialNumber' => 'DOCUMENT-123',
+            'components' => [
+                [
+                    'type' => 'library',
+                    'bom-ref' => 'component-1',
+                    'name' => 'component1',
+                    'version' => '1.0.0',
+                    'description' => 'Test component 1',
+                    'licenses' => [
+                        [
+                            'license' => [
+                                'id' => 'MIT'
+                            ]
+                        ]
+                    ],
+                    'hashes' => [
+                        [
+                            'alg' => 'SHA-1',
+                            'content' => 'abcdef123456'
+                        ],
+                        [
+                            'alg' => 'MD5',
+                            'content' => '123456abcdef'
+                        ]
+                    ],
+                    'customComponentField' => 'Custom value'
+                ],
+                [
+                    'type' => 'application',
+                    'bom-ref' => 'component-2',
+                    'name' => 'component2',
+                    'version' => '2.0.0',
+                    'supplier' => 'Company X',
+                    'unsupportedHashAlg' => [
+                        [
+                            'alg' => 'UNSUPPORTED-ALG',
+                            'content' => '123456'
+                        ]
+                    ]
+                ]
+            ]
+        ]);
+        
+        // Perform conversion
+        $result = $converter->convertCyclonedxToSpdx($cyclonedxJson);
+        
+        // Assert basic result properties
+        $this->assertInstanceOf(ConversionResult::class, $result);
+        $this->assertEquals('SPDX', $result->getFormat());
+        
+        // Parse the content
+        $content = json_decode($result->getContent(), true);
+        
+        // Test packages array
+        $this->assertArrayHasKey('packages', $content);
+        $this->assertIsArray($content['packages']);
+        $this->assertCount(2, $content['packages']);
+        
+        // Test first package mapping
+        $package1 = $content['packages'][0];
+        $this->assertEquals('SPDXRef-component-1', $package1['SPDXID']);
+        $this->assertEquals('component1', $package1['name']);
+        $this->assertEquals('1.0.0', $package1['versionInfo']);
+        $this->assertEquals('Test component 1', $package1['description']);
+        
+        // Test license mapping
+        $this->assertEquals('MIT', $package1['licenseConcluded']);
+        
+        // Test hash mapping
+        $this->assertArrayHasKey('checksums', $package1);
+        $this->assertCount(2, $package1['checksums']);
+        $this->assertEquals('SHA1', $package1['checksums'][0]['algorithm']);
+        $this->assertEquals('abcdef123456', $package1['checksums'][0]['checksumValue']);
+        $this->assertEquals('MD5', $package1['checksums'][1]['algorithm']);
+        $this->assertEquals('123456abcdef', $package1['checksums'][1]['checksumValue']);
+        
+        // Test second package mapping
+        $package2 = $content['packages'][1];
+        $this->assertEquals('SPDXRef-component-2', $package2['SPDXID']);
+        $this->assertEquals('component2', $package2['name']);
+        $this->assertEquals('2.0.0', $package2['versionInfo']);
+        $this->assertEquals('Company X', $package2['supplier']);
+        
+        // Test that warnings were generated for unmapped fields
+        $warnings = $result->getWarnings();
+        $this->assertNotEmpty($warnings);
+        $this->assertTrue(in_array('Unknown or unmapped component field: customComponentField', $warnings));
+        // We might also expect warnings for unsupported hash algorithm, but it's not directly tested here
+        // as it depends on how exactly unsupportedHashAlg is processed
+    }
+    
+    /**
+     * Test conversion with missing required fields
+     */
+    public function testConversionWithMissingRequiredFields(): void
+    {
+        $converter = new Converter();
+        
+        // SPDX with package missing name
+        $spdxJson = json_encode([
+            'spdxVersion' => 'SPDX-2.3',
+            'dataLicense' => 'CC0-1.0',
+            'SPDXID' => 'SPDXRef-DOCUMENT',
+            'packages' => [
+                [
+                    'SPDXID' => 'SPDXRef-Package-1',
+                    'versionInfo' => '1.0.0',
+                    // name is missing
+                    'licenseConcluded' => 'MIT'
+                ]
+            ]
+        ]);
+        
+        // Perform conversion
+        $result = $converter->convertSpdxToCyclonedx($spdxJson);
+        
+        // Parse the content
+        $content = json_decode($result->getContent(), true);
+        
+        // Check that component was created despite missing name
+        $this->assertArrayHasKey('components', $content);
+        $this->assertCount(1, $content['components']);
+        
+        // Check that the component has an auto-generated name
+        $component = $content['components'][0];
+        $this->assertStringStartsWith('unknown-', $component['name']);
+        
+        // Check for warning about missing name
+        $warnings = $result->getWarnings();
+        $this->assertTrue(in_array('Package missing required field: name', $warnings));
+        
+        // CycloneDX with component missing name
+        $cyclonedxJson = json_encode([
+            'bomFormat' => 'CycloneDX',
+            'specVersion' => '1.4',
+            'components' => [
+                [
+                    'type' => 'library',
+                    'bom-ref' => 'component-1',
+                    // name is missing
+                    'version' => '1.0.0'
+                ]
+            ]
+        ]);
+        
+        // Perform conversion
+        $result = $converter->convertCyclonedxToSpdx($cyclonedxJson);
+        
+        // Parse the content
+        $content = json_decode($result->getContent(), true);
+        
+        // Check that package was created despite missing name
+        $this->assertArrayHasKey('packages', $content);
+        $this->assertCount(1, $content['packages']);
+        
+        // Check that the package has an auto-generated name
+        $package = $content['packages'][0];
+        $this->assertStringStartsWith('unknown-', $package['name']);
+        
+        // Check for warning about missing name
+        $warnings = $result->getWarnings();
+        $this->assertTrue(in_array('Component missing required field: name', $warnings));
+    }
+    
+    /**
+     * Test ConversionResult warnings functionality
      */
     public function testConversionResultWarnings(): void
     {

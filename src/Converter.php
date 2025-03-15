@@ -14,7 +14,8 @@ class Converter
         'name' => ['field' => 'name', 'transform' => null],
         'SPDXID' => ['field' => 'serialNumber', 'transform' => 'transformSpdxId'],
         'documentNamespace' => ['field' => 'documentNamespace', 'transform' => null],
-        'creationInfo' => ['field' => 'metadata', 'transform' => 'transformCreationInfo']
+        'creationInfo' => ['field' => 'metadata', 'transform' => 'transformCreationInfo'],
+        'packages' => ['field' => 'components', 'transform' => 'transformPackagesToComponents']
     ];
     
     // CycloneDX to SPDX field mappings
@@ -24,7 +25,33 @@ class Converter
         'version' => ['field' => null, 'transform' => null], // No direct mapping
         'serialNumber' => ['field' => 'SPDXID', 'transform' => 'transformSerialNumber'],
         'name' => ['field' => 'name', 'transform' => null],
-        'metadata' => ['field' => 'creationInfo', 'transform' => 'transformMetadata']
+        'metadata' => ['field' => 'creationInfo', 'transform' => 'transformMetadata'],
+        'components' => ['field' => 'packages', 'transform' => 'transformComponentsToPackages']
+    ];
+    
+    // SPDX package field to CycloneDX component field mappings
+    private const PACKAGE_TO_COMPONENT_MAPPINGS = [
+        'name' => 'name',
+        'versionInfo' => 'version',
+        'downloadLocation' => 'purl', // Will need transformation
+        'supplier' => 'supplier', // Will need transformation
+        'licenseConcluded' => 'licenses', // Will need transformation
+        'licenseDeclared' => 'licenses', // Secondary source
+        'description' => 'description',
+        'packageFileName' => 'purl', // Secondary source for purl
+        'packageVerificationCode' => 'hashes', // Will need transformation
+        'checksums' => 'hashes' // Will need transformation
+    ];
+    
+    // CycloneDX component field to SPDX package field mappings
+    private const COMPONENT_TO_PACKAGE_MAPPINGS = [
+        'name' => 'name',
+        'version' => 'versionInfo',
+        'purl' => 'downloadLocation', // Will need transformation
+        'supplier' => 'supplier', // Will need transformation
+        'licenses' => 'licenseConcluded', // Will need transformation
+        'description' => 'description',
+        'hashes' => 'checksums' // Will need transformation
     ];
     
     /**
@@ -63,7 +90,12 @@ class Converter
                 
                 // Apply transformation if needed
                 if ($mapping['transform'] !== null && method_exists($this, $mapping['transform'])) {
-                    $value = $this->{$mapping['transform']}($value);
+                    if ($spdxField === 'packages') {
+                        // For packages, we need to pass the warnings array by reference
+                        $value = $this->{$mapping['transform']}($value, $warnings);
+                    } else {
+                        $value = $this->{$mapping['transform']}($value);
+                    }
                 }
                 
                 // Set the value in CycloneDX data
@@ -132,7 +164,12 @@ class Converter
                 
                 // Apply transformation if needed
                 if ($mapping['transform'] !== null && method_exists($this, $mapping['transform'])) {
-                    $value = $this->{$mapping['transform']}($value);
+                    if ($cyclonedxField === 'components') {
+                        // For components, we need to pass the warnings array by reference
+                        $value = $this->{$mapping['transform']}($value, $warnings);
+                    } else {
+                        $value = $this->{$mapping['transform']}($value);
+                    }
                 }
                 
                 // Set the value in SPDX data
@@ -193,6 +230,230 @@ class Converter
         }
         
         return $data;
+    }
+    
+    /**
+     * Transform SPDX packages array to CycloneDX components array
+     * 
+     * @param array $packages SPDX packages array
+     * @param array &$warnings Array to collect warnings during conversion
+     * @return array CycloneDX components array
+     */
+    protected function transformPackagesToComponents(array $packages, array &$warnings): array
+    {
+        $components = [];
+        
+        foreach ($packages as $package) {
+            $component = [
+                'type' => 'library', // Default type
+                'bom-ref' => isset($package['SPDXID']) ? $this->transformSpdxId($package['SPDXID']) : uniqid('component-')
+            ];
+            
+            // Map known fields from package to component
+            foreach (self::PACKAGE_TO_COMPONENT_MAPPINGS as $packageField => $componentField) {
+                if (isset($package[$packageField])) {
+                    // Handle special transformations
+                    switch ($packageField) {
+                        case 'checksums':
+                            $component['hashes'] = $this->transformSpdxChecksums($package[$packageField], $warnings);
+                            break;
+                        
+                        case 'packageVerificationCode':
+                            if (!isset($component['hashes'])) {
+                                $component['hashes'] = [];
+                            }
+                            
+                            // Add verification code as a hash
+                            if (isset($package[$packageField]['value'])) {
+                                $component['hashes'][] = [
+                                    'alg' => 'SHA1',
+                                    'content' => $package[$packageField]['value']
+                                ];
+                            }
+                            break;
+                        
+                        case 'licenseConcluded':
+                        case 'licenseDeclared':
+                            // Only process if licenses haven't been set yet
+                            if (!isset($component['licenses']) && !empty($package[$packageField])) {
+                                $component['licenses'] = [
+                                    [
+                                        'license' => [
+                                            'id' => $package[$packageField]
+                                        ]
+                                    ]
+                                ];
+                            }
+                            break;
+                            
+                        default:
+                            // Direct field mapping
+                            $component[$componentField] = $package[$packageField];
+                    }
+                }
+            }
+            
+            // Check for unknown fields in the package
+            foreach (array_keys($package) as $field) {
+                if (!array_key_exists($field, self::PACKAGE_TO_COMPONENT_MAPPINGS) && $field !== 'SPDXID') {
+                    $warnings[] = "Unknown or unmapped package field: {$field}";
+                }
+            }
+            
+            // Check required fields
+            if (!isset($component['name'])) {
+                $warnings[] = "Package missing required field: name";
+                $component['name'] = 'unknown-' . uniqid();
+            }
+            
+            $components[] = $component;
+        }
+        
+        return $components;
+    }
+    
+    /**
+     * Transform CycloneDX components array to SPDX packages array
+     * 
+     * @param array $components CycloneDX components array
+     * @param array &$warnings Array to collect warnings during conversion
+     * @return array SPDX packages array
+     */
+    protected function transformComponentsToPackages(array $components, array &$warnings): array
+    {
+        $packages = [];
+        
+        foreach ($components as $component) {
+            $package = [
+                'SPDXID' => isset($component['bom-ref']) 
+                    ? 'SPDXRef-' . $component['bom-ref'] 
+                    : 'SPDXRef-' . uniqid('pkg-')
+            ];
+            
+            // Map known fields from component to package
+            foreach (self::COMPONENT_TO_PACKAGE_MAPPINGS as $componentField => $packageField) {
+                if (isset($component[$componentField])) {
+                    // Handle special transformations
+                    switch ($componentField) {
+                        case 'hashes':
+                            $package['checksums'] = $this->transformCycloneDxHashes($component[$componentField], $warnings);
+                            break;
+                            
+                        case 'licenses':
+                            // Extract the first license ID if available
+                            if (is_array($component[$componentField]) && !empty($component[$componentField])) {
+                                $license = $component[$componentField][0];
+                                if (isset($license['license']['id'])) {
+                                    $package['licenseConcluded'] = $license['license']['id'];
+                                } elseif (isset($license['license']['name'])) {
+                                    $package['licenseConcluded'] = $license['license']['name'];
+                                } else {
+                                    $warnings[] = "Component license format not recognized";
+                                }
+                            }
+                            break;
+                            
+                        default:
+                            // Direct field mapping
+                            $package[$packageField] = $component[$componentField];
+                    }
+                }
+            }
+            
+            // Check for unknown fields in the component
+            foreach (array_keys($component) as $field) {
+                if (!array_key_exists($field, self::COMPONENT_TO_PACKAGE_MAPPINGS) && 
+                    $field !== 'bom-ref' && $field !== 'type') {
+                    $warnings[] = "Unknown or unmapped component field: {$field}";
+                }
+            }
+            
+            // Check required fields
+            if (!isset($package['name'])) {
+                $warnings[] = "Component missing required field: name";
+                $package['name'] = 'unknown-' . uniqid();
+            }
+            
+            $packages[] = $package;
+        }
+        
+        return $packages;
+    }
+    
+    /**
+     * Transform SPDX checksums to CycloneDX hashes
+     * 
+     * @param array $checksums SPDX checksums array
+     * @param array &$warnings Array to collect warnings during conversion
+     * @return array CycloneDX hashes array
+     */
+    protected function transformSpdxChecksums(array $checksums, array &$warnings): array
+    {
+        $hashes = [];
+        
+        foreach ($checksums as $checksum) {
+            if (isset($checksum['algorithm']) && isset($checksum['checksumValue'])) {
+                // Map SPDX algorithm to CycloneDX algorithm
+                $algorithm = match(strtoupper($checksum['algorithm'])) {
+                    'SHA1' => 'SHA-1',
+                    'SHA256' => 'SHA-256',
+                    'SHA512' => 'SHA-512',
+                    'MD5' => 'MD5',
+                    default => null
+                };
+                
+                if ($algorithm) {
+                    $hashes[] = [
+                        'alg' => $algorithm,
+                        'content' => $checksum['checksumValue']
+                    ];
+                } else {
+                    $warnings[] = "Unsupported hash algorithm: {$checksum['algorithm']}";
+                }
+            } else {
+                $warnings[] = "Malformed checksum entry in SPDX package";
+            }
+        }
+        
+        return $hashes;
+    }
+    
+    /**
+     * Transform CycloneDX hashes to SPDX checksums
+     * 
+     * @param array $hashes CycloneDX hashes array
+     * @param array &$warnings Array to collect warnings during conversion
+     * @return array SPDX checksums array
+     */
+    protected function transformCycloneDxHashes(array $hashes, array &$warnings): array
+    {
+        $checksums = [];
+        
+        foreach ($hashes as $hash) {
+            if (isset($hash['alg']) && isset($hash['content'])) {
+                // Map CycloneDX algorithm to SPDX algorithm
+                $algorithm = match(strtoupper($hash['alg'])) {
+                    'SHA-1', 'SHA1' => 'SHA1',
+                    'SHA-256', 'SHA256' => 'SHA256',
+                    'SHA-512', 'SHA512' => 'SHA512',
+                    'MD5' => 'MD5',
+                    default => null
+                };
+                
+                if ($algorithm) {
+                    $checksums[] = [
+                        'algorithm' => $algorithm,
+                        'checksumValue' => $hash['content']
+                    ];
+                } else {
+                    $warnings[] = "Unsupported hash algorithm: {$hash['alg']}";
+                }
+            } else {
+                $warnings[] = "Malformed hash entry in CycloneDX component";
+            }
+        }
+        
+        return $checksums;
     }
     
     /**
