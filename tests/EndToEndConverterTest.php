@@ -1,10 +1,10 @@
 <?php
 
-namespace SBOMinator\Converter\Tests;
+namespace SBOMinator\Transformatron\Tests;
 
 use PHPUnit\Framework\TestCase;
-use SBOMinator\Converter\ConversionResult;
-use SBOMinator\Converter\Converter;
+use SBOMinator\Transformatron\ConversionResult;
+use SBOMinator\Transformatron\Converter;
 
 /**
  * End-to-end tests for verifying conversion between real SPDX and CycloneDX samples

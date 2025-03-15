@@ -1,9 +1,9 @@
 <?php
 
-namespace SBOMinator\Converter;
+namespace SBOMinator\Transformatron;
 
-use SBOMinator\Converter\Exception\ConversionException;
-use SBOMinator\Converter\Exception\ValidationException;
+use SBOMinator\Transformatron\Exception\ConversionException;
+use SBOMinator\Transformatron\Exception\ValidationException;
 
 /**
  * Main converter class for transforming between SPDX and CycloneDX formats

@@ -1,6 +1,6 @@
 <?php
 
-namespace SBOMinator\Converter;
+namespace SBOMinator\Transformatron;
 
 /**
  * Class to hold the result of an SBOM conversion

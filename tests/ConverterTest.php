@@ -1,12 +1,12 @@
 <?php
 
-namespace SBOMinator\Converter\Tests;
+namespace SBOMinator\Transformatron\Tests;
 
 use PHPUnit\Framework\TestCase;
-use SBOMinator\Converter\ConversionResult;
-use SBOMinator\Converter\Converter;
-use SBOMinator\Converter\Exception\ConversionException;
-use SBOMinator\Converter\Exception\ValidationException;
+use SBOMinator\Transformatron\ConversionResult;
+use SBOMinator\Transformatron\Converter;
+use SBOMinator\Transformatron\Exception\ConversionException;
+use SBOMinator\Transformatron\Exception\ValidationException;
 
 class ConverterTest extends TestCase
 {

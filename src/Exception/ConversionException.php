@@ -1,6 +1,6 @@
 <?php
 
-namespace SBOMinator\Converter\Exception;
+namespace SBOMinator\Transformatron\Exception;
 
 /**
  * Exception thrown when SBOM conversion fails.

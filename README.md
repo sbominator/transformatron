@@ -1,13 +1,13 @@
-# SBOMinator Converter
+# SBOMinator Transformatron
 
-A PHP library for converting Software Bill of Materials (SBOM) between SPDX and CycloneDX formats.
+A PHP library for transforming Software Bill of Materials (SBOM) between SPDX and CycloneDX formats.
 
 ## Installation
 
 Install via Composer:
 
 ```bash
-composer require sbominator/converter
+composer require sbominator/transformatron
 ```
 
 ## Requirements
@@ -19,9 +19,9 @@ composer require sbominator/converter
 ```php
 <?php
 
-use SBOMinator\Converter\Converter;
-use SBOMinator\Converter\Exception\ConversionException;
-use SBOMinator\Converter\Exception\ValidationException;
+use SBOMinator\Transformatron\Converter;
+use SBOMinator\Transformatron\Exception\ConversionException;
+use SBOMinator\Transformatron\Exception\ValidationException;
 
 // Create a converter instance
 $converter = new Converter();
