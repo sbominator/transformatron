@@ -121,11 +121,7 @@ class Converter
         } catch (ValidationException $exception) {
             throw $exception;
         } catch (\Exception $exception) {
-            throw new ConversionException(
-                'Failed to convert SPDX to CycloneDX: ' . $exception->getMessage(),
-                self::FORMAT_SPDX,
-                self::FORMAT_CYCLONEDX
-            );
+            throw new ConversionException($exception->getMessage(), self::FORMAT_SPDX, self::FORMAT_CYCLONEDX);
         }
     }
     
@@ -173,11 +169,7 @@ class Converter
         } catch (ValidationException $exception) {
             throw $exception;
         } catch (\Exception $exception) {
-            throw new ConversionException(
-                'Failed to convert CycloneDX to SPDX: ' . $exception->getMessage(),
-                self::FORMAT_CYCLONEDX,
-                self::FORMAT_SPDX
-            );
+            throw new ConversionException($exception->getMessage(), self::FORMAT_CYCLONEDX, self::FORMAT_SPDX);
         }
     }
     

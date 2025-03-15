@@ -35,7 +35,7 @@ class ConverterTest extends TestCase
         // Test ConversionException instantiation
         $conversionException = new ConversionException('Conversion failed', 'SPDX', 'CycloneDX');
         $this->assertInstanceOf(ConversionException::class, $conversionException);
-        $this->assertEquals('Conversion failed', $conversionException->getMessage());
+        $this->assertEquals('Failed to convert SPDX to CycloneDX: Conversion failed', $conversionException->getMessage());
         $this->assertEquals('SPDX', $conversionException->getSourceFormat());
         $this->assertEquals('CycloneDX', $conversionException->getTargetFormat());
     }

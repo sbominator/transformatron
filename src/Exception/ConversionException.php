@@ -10,18 +10,18 @@ class ConversionException extends \Exception implements ExceptionInterface
     /**
      * The source format that was being converted.
      */
-    private ?string $sourceFormat;
+    private string $sourceFormat;
     
     /**
      * The target format that was being converted to.
      */
-    private ?string $targetFormat;
+    private string $targetFormat;
     
     /**
      * Constructor.
      */
-    public function __construct(string $message, ?string $sourceFormat = null, ?string $targetFormat = null) {
-        parent::__construct($message);
+    public function __construct(string $message, string $sourceFormat, string $targetFormat) {
+        parent::__construct(sprintf('Failed to convert %s to %s: %s', $sourceFormat, $targetFormat, $message));
         
         $this->sourceFormat = $sourceFormat;
         $this->targetFormat = $targetFormat;
