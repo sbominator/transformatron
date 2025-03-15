@@ -90,14 +90,6 @@ class Converter
     ];
     
     /**
-     * Constructor for the Converter class
-     */
-    public function __construct()
-    {
-        // No initialization needed at this time
-    }
-
-    /**
      * Convert SPDX format to CycloneDX format
      *
      * @param string $json The SPDX JSON to convert
@@ -108,81 +100,24 @@ class Converter
     public function convertSpdxToCyclonedx(string $json): ConversionResult
     {
         try {
-            // Decode the JSON input
             $spdxData = $this->decodeJson($json);
-            
-            // Validate required fields
             $this->validateSpdxFields($spdxData);
             
-            // Initialize CycloneDX structure and warnings array
-            $cyclonedxData = [
-                'bomFormat' => 'CycloneDX',
-                'specVersion' => self::CYCLONEDX_VERSION,
-                'version' => 1,
-                'components' => []
-            ];
+            $cyclonedxData = $this->getInitialCycloneDxData();
             $warnings = [];
             
-            // Map fields from SPDX to CycloneDX
-            foreach (self::SPDX_TO_CYCLONEDX_MAPPINGS as $spdxField => $mapping) {
-                if (!isset($spdxData[$spdxField])) {
-                    if (in_array($spdxField, self::REQUIRED_SPDX_FIELDS)) {
-                        $warnings[] = "Missing required SPDX field: {$spdxField}";
-                    }
-                    continue;
-                }
-                
-                $value = $spdxData[$spdxField];
-                
-                // Skip if no target field is defined
-                if ($mapping['field'] === null) {
-                    continue;
-                }
-                
-                // Apply transformation if needed
-                if ($mapping['transform'] !== null && method_exists($this, $mapping['transform'])) {
-                    if ($spdxField === 'packages' || $spdxField === 'relationships') {
-                        // For packages and relationships, we need to pass the warnings array by reference
-                        $value = $this->{$mapping['transform']}($value, $warnings);
-                    } else {
-                        $value = $this->{$mapping['transform']}($value);
-                    }
-                }
-                
-                // Set the value in CycloneDX data
-                $cyclonedxData[$mapping['field']] = $value;
-            }
+            $cyclonedxData = $this->mapSpdxToCyclonedx($spdxData, $cyclonedxData, $warnings);
+            $warnings = array_merge($warnings, $this->checkUnknownSpdxFields($spdxData));
             
-            // Check for unknown fields in SPDX
-            foreach (array_keys($spdxData) as $field) {
-                if (!array_key_exists($field, self::SPDX_TO_CYCLONEDX_MAPPINGS)) {
-                    $warnings[] = "Unknown or unmapped SPDX field: {$field}";
-                }
-            }
-            
-            // Always include metadata section
             if (!isset($cyclonedxData['metadata'])) {
-                $cyclonedxData['metadata'] = [
-                    'timestamp' => date('c'),
-                    'tools' => [
-                        [
-                            'vendor' => 'SBOMinator',
-                            'name' => 'Converter',
-                            'version' => '1.0.0'
-                        ]
-                    ]
-                ];
+                $cyclonedxData['metadata'] = $this->createDefaultMetadata();
             }
             
-            // Convert to JSON
             $cyclonedxContent = json_encode($cyclonedxData, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
-            
             return new ConversionResult($cyclonedxContent, self::FORMAT_CYCLONEDX, $warnings);
         } catch (ValidationException $e) {
-            // Rethrow validation exceptions
             throw $e;
         } catch (\Exception $e) {
-            // Wrap other exceptions
             throw new ConversionException(
                 'Failed to convert SPDX to CycloneDX: ' . $e->getMessage(),
                 self::FORMAT_SPDX,
@@ -191,6 +126,21 @@ class Converter
                 $e
             );
         }
+    }
+    
+    /**
+     * Get initial CycloneDX data structure
+     *
+     * @return array Initial CycloneDX data
+     */
+    protected function getInitialCycloneDxData(): array
+    {
+        return [
+            'bomFormat' => 'CycloneDX',
+            'specVersion' => self::CYCLONEDX_VERSION,
+            'version' => 1,
+            'components' => []
+        ];
     }
     
     /**
@@ -204,79 +154,24 @@ class Converter
     public function convertCyclonedxToSpdx(string $json): ConversionResult
     {
         try {
-            // Decode the JSON input
             $cyclonedxData = $this->decodeJson($json);
-            
-            // Validate required fields
             $this->validateCycloneDxFields($cyclonedxData);
             
-            // Initialize SPDX structure and warnings array
-            $spdxData = [
-                'spdxVersion' => self::SPDX_VERSION,
-                'dataLicense' => 'CC0-1.0',
-                'SPDXID' => 'SPDXRef-DOCUMENT',
-                'documentNamespace' => 'https://sbominator.example/spdx/placeholder-' . uniqid(),
-                'packages' => [],
-                'relationships' => []
-            ];
+            $spdxData = $this->getInitialSpdxData();
             $warnings = [];
             
-            // Map fields from CycloneDX to SPDX
-            foreach (self::CYCLONEDX_TO_SPDX_MAPPINGS as $cyclonedxField => $mapping) {
-                if (!isset($cyclonedxData[$cyclonedxField])) {
-                    if (in_array($cyclonedxField, self::REQUIRED_CYCLONEDX_FIELDS)) {
-                        $warnings[] = "Missing required CycloneDX field: {$cyclonedxField}";
-                    }
-                    continue;
-                }
-                
-                $value = $cyclonedxData[$cyclonedxField];
-                
-                // Skip if no target field is defined
-                if ($mapping['field'] === null) {
-                    continue;
-                }
-                
-                // Apply transformation if needed
-                if ($mapping['transform'] !== null && method_exists($this, $mapping['transform'])) {
-                    if ($cyclonedxField === 'components' || $cyclonedxField === 'dependencies') {
-                        // For components and dependencies, we need to pass the warnings array by reference
-                        $value = $this->{$mapping['transform']}($value, $warnings);
-                    } else {
-                        $value = $this->{$mapping['transform']}($value);
-                    }
-                }
-                
-                // Set the value in SPDX data
-                $spdxData[$mapping['field']] = $value;
-            }
+            $spdxData = $this->mapCyclonedxToSpdx($cyclonedxData, $spdxData, $warnings);
+            $warnings = array_merge($warnings, $this->checkUnknownCycloneDxFields($cyclonedxData));
             
-            // Check for unknown fields in CycloneDX
-            foreach (array_keys($cyclonedxData) as $field) {
-                if (!array_key_exists($field, self::CYCLONEDX_TO_SPDX_MAPPINGS)) {
-                    $warnings[] = "Unknown or unmapped CycloneDX field: {$field}";
-                }
-            }
-            
-            // Always include creationInfo section
             if (!isset($spdxData['creationInfo'])) {
-                $spdxData['creationInfo'] = [
-                    'created' => date('c'),
-                    'creators' => [
-                        'Tool: SBOMinator-Converter-1.0'
-                    ]
-                ];
+                $spdxData['creationInfo'] = $this->createDefaultCreationInfo();
             }
             
-            // Convert to JSON
             $spdxContent = json_encode($spdxData, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
-            
             return new ConversionResult($spdxContent, self::FORMAT_SPDX, $warnings);
         } catch (ValidationException $e) {
-            // Rethrow validation exceptions
             throw $e;
         } catch (\Exception $e) {
-            // Wrap other exceptions
             throw new ConversionException(
                 'Failed to convert CycloneDX to SPDX: ' . $e->getMessage(),
                 self::FORMAT_CYCLONEDX,
@@ -285,6 +180,23 @@ class Converter
                 $e
             );
         }
+    }
+    
+    /**
+     * Get initial SPDX data structure
+     *
+     * @return array Initial SPDX data
+     */
+    protected function getInitialSpdxData(): array
+    {
+        return [
+            'spdxVersion' => self::SPDX_VERSION,
+            'dataLicense' => 'CC0-1.0',
+            'SPDXID' => 'SPDXRef-DOCUMENT',
+            'documentNamespace' => 'https://sbominator.example/spdx/placeholder-' . uniqid(),
+            'packages' => [],
+            'relationships' => []
+        ];
     }
 
     /**
@@ -323,13 +235,9 @@ class Converter
      */
     protected function validateSpdxFields(array $data): void
     {
-        $missingFields = [];
-        
-        foreach (self::REQUIRED_SPDX_FIELDS as $field) {
-            if (!isset($data[$field])) {
-                $missingFields[] = $field;
-            }
-        }
+        $missingFields = array_filter(self::REQUIRED_SPDX_FIELDS, function($field) use ($data) {
+            return !isset($data[$field]);
+        });
         
         if (empty($missingFields)) {
             return;
@@ -349,13 +257,9 @@ class Converter
      */
     protected function validateCycloneDxFields(array $data): void
     {
-        $missingFields = [];
-        
-        foreach (self::REQUIRED_CYCLONEDX_FIELDS as $field) {
-            if (!isset($data[$field])) {
-                $missingFields[] = $field;
-            }
-        }
+        $missingFields = array_filter(self::REQUIRED_CYCLONEDX_FIELDS, function($field) use ($data) {
+            return !isset($data[$field]);
+        });
         
         if (!empty($missingFields)) {
             throw new ValidationException(
@@ -364,13 +268,200 @@ class Converter
             );
         }
         
-        // Extra validation for specific fields
+        $this->validateBomFormat($data);
+    }
+    
+    /**
+     * Validate CycloneDX bomFormat field
+     * 
+     * @param array $data The CycloneDX data
+     * @throws ValidationException If bomFormat is invalid
+     */
+    protected function validateBomFormat(array $data): void
+    {
         if (!isset($data['bomFormat']) || $data['bomFormat'] !== 'CycloneDX') {
             throw new ValidationException(
                 'Invalid CycloneDX bomFormat: ' . ($data['bomFormat'] ?? 'missing'),
                 ['invalid_field' => 'bomFormat']
             );
         }
+    }
+    
+    /**
+     * Maps SPDX fields to CycloneDX fields
+     * 
+     * @param array $spdxData SPDX data
+     * @param array $cyclonedxData Initial CycloneDX data structure
+     * @param array &$warnings Array to collect warnings
+     * @return array Updated CycloneDX data
+     */
+    protected function mapSpdxToCyclonedx(array $spdxData, array $cyclonedxData, array &$warnings): array
+    {
+        foreach (self::SPDX_TO_CYCLONEDX_MAPPINGS as $spdxField => $mapping) {
+            if (!isset($spdxData[$spdxField])) {
+                $this->warnIfRequiredField($spdxField, self::REQUIRED_SPDX_FIELDS, $warnings);
+                continue;
+            }
+            
+            if ($mapping['field'] === null) {
+                continue;
+            }
+            
+            $value = $this->transformFieldValue(
+                $spdxData[$spdxField], 
+                $mapping['transform'], 
+                $spdxField, 
+                $warnings
+            );
+            
+            $cyclonedxData[$mapping['field']] = $value;
+        }
+        
+        return $cyclonedxData;
+    }
+    
+    /**
+     * Maps CycloneDX fields to SPDX fields
+     * 
+     * @param array $cyclonedxData CycloneDX data
+     * @param array $spdxData Initial SPDX data structure
+     * @param array &$warnings Array to collect warnings
+     * @return array Updated SPDX data
+     */
+    protected function mapCyclonedxToSpdx(array $cyclonedxData, array $spdxData, array &$warnings): array
+    {
+        foreach (self::CYCLONEDX_TO_SPDX_MAPPINGS as $cyclonedxField => $mapping) {
+            if (!isset($cyclonedxData[$cyclonedxField])) {
+                $this->warnIfRequiredField($cyclonedxField, self::REQUIRED_CYCLONEDX_FIELDS, $warnings);
+                continue;
+            }
+            
+            if ($mapping['field'] === null) {
+                continue;
+            }
+            
+            $value = $this->transformFieldValue(
+                $cyclonedxData[$cyclonedxField], 
+                $mapping['transform'], 
+                $cyclonedxField, 
+                $warnings
+            );
+            
+            $spdxData[$mapping['field']] = $value;
+        }
+        
+        return $spdxData;
+    }
+    
+    /**
+     * Add warning if field is required
+     * 
+     * @param string $field Field name
+     * @param array $requiredFields List of required fields
+     * @param array &$warnings Warnings array to update
+     */
+    protected function warnIfRequiredField(string $field, array $requiredFields, array &$warnings): void
+    {
+        if (in_array($field, $requiredFields)) {
+            $warnings[] = "Missing required field: {$field}";
+        }
+    }
+    
+    /**
+     * Transform field value using specified transform method
+     * 
+     * @param mixed $value Value to transform
+     * @param string|null $transform Transform method name
+     * @param string $fieldName Field name for special handling
+     * @param array &$warnings Warnings array for methods that need it
+     * @return mixed Transformed value
+     */
+    protected function transformFieldValue($value, ?string $transform, string $fieldName, array &$warnings)
+    {
+        if ($transform === null || !method_exists($this, $transform)) {
+            return $value;
+        }
+        
+        // Special handling for fields that need warnings array
+        $needsWarnings = in_array($fieldName, ['packages', 'relationships', 'components', 'dependencies']);
+        
+        return $needsWarnings 
+            ? $this->{$transform}($value, $warnings)
+            : $this->{$transform}($value);
+    }
+    
+    /**
+     * Check for unknown fields in SPDX data
+     * 
+     * @param array $spdxData SPDX data
+     * @return array Warnings for unknown fields
+     */
+    protected function checkUnknownSpdxFields(array $spdxData): array
+    {
+        $knownFields = array_keys(self::SPDX_TO_CYCLONEDX_MAPPINGS);
+        return $this->collectUnknownFieldWarnings($spdxData, $knownFields, 'SPDX');
+    }
+    
+    /**
+     * Check for unknown fields in CycloneDX data
+     * 
+     * @param array $cyclonedxData CycloneDX data
+     * @return array Warnings for unknown fields
+     */
+    protected function checkUnknownCycloneDxFields(array $cyclonedxData): array
+    {
+        $knownFields = array_keys(self::CYCLONEDX_TO_SPDX_MAPPINGS);
+        return $this->collectUnknownFieldWarnings($cyclonedxData, $knownFields, 'CycloneDX');
+    }
+    
+    /**
+     * Collect warnings for unknown fields
+     * 
+     * @param array $data Data to check
+     * @param array $knownFields Known field names
+     * @param string $formatName Format name for warning message
+     * @return array Warnings
+     */
+    protected function collectUnknownFieldWarnings(array $data, array $knownFields, string $formatName): array
+    {
+        $unknownFields = array_diff(array_keys($data), $knownFields);
+        return array_map(function($field) use ($formatName) {
+            return "Unknown or unmapped {$formatName} field: {$field}";
+        }, $unknownFields);
+    }
+    
+    /**
+     * Create default metadata for CycloneDX
+     * 
+     * @return array Default metadata
+     */
+    protected function createDefaultMetadata(): array
+    {
+        return [
+            'timestamp' => date('c'),
+            'tools' => [
+                [
+                    'vendor' => 'SBOMinator',
+                    'name' => 'Converter',
+                    'version' => '1.0.0'
+                ]
+            ]
+        ];
+    }
+    
+    /**
+     * Create default creation info for SPDX
+     * 
+     * @return array Default creation info
+     */
+    protected function createDefaultCreationInfo(): array
+    {
+        return [
+            'created' => date('c'),
+            'creators' => [
+                'Tool: SBOMinator-Converter-1.0'
+            ]
+        ];
     }
     
     /**
@@ -382,77 +473,168 @@ class Converter
      */
     protected function transformPackagesToComponents(array $packages, array &$warnings): array
     {
-        $components = [];
+        return array_map(function($package) use (&$warnings) {
+            return $this->transformPackageToComponent($package, $warnings);
+        }, $packages);
+    }
+    
+    /**
+     * Transform a single SPDX package to a CycloneDX component
+     * 
+     * @param array $package SPDX package
+     * @param array &$warnings Array to collect warnings
+     * @return array CycloneDX component
+     */
+    protected function transformPackageToComponent(array $package, array &$warnings): array
+    {
+        $component = [
+            'type' => 'library', // Default type
+            'bom-ref' => isset($package['SPDXID']) ? $this->transformSpdxId($package['SPDXID']) : uniqid('component-')
+        ];
         
-        foreach ($packages as $package) {
-            $component = [
-                'type' => 'library', // Default type
-                'bom-ref' => isset($package['SPDXID']) ? $this->transformSpdxId($package['SPDXID']) : uniqid('component-')
-            ];
-            
-            // Map known fields from package to component
-            foreach (self::PACKAGE_TO_COMPONENT_MAPPINGS as $packageField => $componentField) {
-                if (!isset($package[$packageField])) {
-                    continue;
-                }
-                
-                // Handle special transformations
-                switch ($packageField) {
-                    case 'checksums':
-                        $component['hashes'] = $this->transformSpdxChecksums($package[$packageField], $warnings);
-                        break;
-                    
-                    case 'packageVerificationCode':
-                        if (!isset($component['hashes'])) {
-                            $component['hashes'] = [];
-                        }
-                        
-                        // Add verification code as a hash
-                        if (isset($package[$packageField]['value'])) {
-                            $component['hashes'][] = [
-                                'alg' => 'SHA1',
-                                'content' => $package[$packageField]['value']
-                            ];
-                        }
-                        break;
-                    
-                    case 'licenseConcluded':
-                    case 'licenseDeclared':
-                        // Only process if licenses haven't been set yet
-                        if (!isset($component['licenses']) && !empty($package[$packageField])) {
-                            $component['licenses'] = [
-                                [
-                                    'license' => [
-                                        'id' => $package[$packageField]
-                                    ]
-                                ]
-                            ];
-                        }
-                        break;
-                        
-                    default:
-                        // Direct field mapping
-                        $component[$componentField] = $package[$packageField];
-                }
-            }
-            
-            // Check for unknown fields in the package
-            foreach (array_keys($package) as $field) {
-                if (!array_key_exists($field, self::PACKAGE_TO_COMPONENT_MAPPINGS) && $field !== 'SPDXID') {
-                    $warnings[] = "Unknown or unmapped package field: {$field}";
-                }
-            }
-            
-            // Check required fields
-            if (!isset($component['name'])) {
-                $warnings[] = "Package missing required field: name";
-                $component['name'] = 'unknown-' . uniqid();
-            }
-            
-            $components[] = $component;
+        $component = $this->mapPackageFieldsToComponent($package, $component, $warnings);
+        $this->addUnknownPackageFieldWarnings($package, $warnings);
+        
+        if (!isset($component['name'])) {
+            $warnings[] = "Package missing required field: name";
+            $component['name'] = 'unknown-' . uniqid();
         }
         
-        return $components;
+        return $component;
+    }
+    
+    /**
+     * Map package fields to component
+     * 
+     * @param array $package Source package
+     * @param array $component Target component
+     * @param array &$warnings Warnings array
+     * @return array Updated component
+     */
+    protected function mapPackageFieldsToComponent(array $package, array $component, array &$warnings): array
+    {
+        foreach (self::PACKAGE_TO_COMPONENT_MAPPINGS as $packageField => $componentField) {
+            if (!isset($package[$packageField])) {
+                continue;
+            }
+            
+            $component = $this->handlePackageFieldTransformation(
+                $component, 
+                $packageField, 
+                $componentField, 
+                $package[$packageField], 
+                $warnings
+            );
+        }
+        
+        return $component;
+    }
+    
+    /**
+     * Handle package field transformation 
+     * 
+     * @param array $component Component to update
+     * @param string $packageField Package field name
+     * @param string $componentField Component field name
+     * @param mixed $value Field value
+     * @param array &$warnings Warnings array
+     * @return array Updated component
+     */
+    protected function handlePackageFieldTransformation(
+        array $component, 
+        string $packageField, 
+        string $componentField, 
+        $value, 
+        array &$warnings
+    ): array {
+        switch ($packageField) {
+            case 'checksums':
+                $component['hashes'] = $this->transformSpdxChecksums($value, $warnings);
+                break;
+            
+            case 'packageVerificationCode':
+                $component = $this->addPackageVerificationCodeAsHash($component, $value);
+                break;
+            
+            case 'licenseConcluded':
+            case 'licenseDeclared':
+                $component = $this->addLicenseIfMissing($component, $value);
+                break;
+                
+            default:
+                // Direct field mapping
+                $component[$componentField] = $value;
+        }
+        
+        return $component;
+    }
+    
+    /**
+     * Add warnings for unknown package fields
+     * 
+     * @param array $package Package data
+     * @param array &$warnings Warnings array
+     */
+    protected function addUnknownPackageFieldWarnings(array $package, array &$warnings): void
+    {
+        $knownFields = array_merge(array_keys(self::PACKAGE_TO_COMPONENT_MAPPINGS), ['SPDXID']);
+        $unknownFields = array_diff(array_keys($package), $knownFields);
+        
+        $warnings = array_merge(
+            $warnings,
+            array_map(function($field) {
+                return "Unknown or unmapped package field: {$field}";
+            }, $unknownFields)
+        );
+    }
+    
+    /**
+     * Add package verification code as a hash
+     * 
+     * @param array $component Component to modify
+     * @param array $verificationCode Verification code data
+     * @return array Updated component
+     */
+    protected function addPackageVerificationCodeAsHash(array $component, array $verificationCode): array
+    {
+        if (!isset($verificationCode['value'])) {
+            return $component;
+        }
+        
+        if (!isset($component['hashes'])) {
+            $component['hashes'] = [];
+        }
+        
+        $component['hashes'][] = [
+            'alg' => 'SHA1',
+            'content' => $verificationCode['value']
+        ];
+        
+        return $component;
+    }
+    
+    /**
+     * Add license to component if not already set
+     * 
+     * @param array $component Component to modify
+     * @param string $license License identifier
+     * @return array Updated component
+     */
+    protected function addLicenseIfMissing(array $component, string $license): array
+    {
+        if (isset($component['licenses']) || empty($license)) {
+            return $component;
+        }
+        
+        $component['licenses'] = [
+            [
+                'license' => [
+                    'id' => $license
+                ]
+            ]
+        ];
+        
+        return $component;
     }
     
     /**
@@ -464,65 +646,142 @@ class Converter
      */
     protected function transformComponentsToPackages(array $components, array &$warnings): array
     {
-        $packages = [];
+        return array_map(function($component) use (&$warnings) {
+            return $this->transformComponentToPackage($component, $warnings);
+        }, $components);
+    }
+    
+    /**
+     * Transform a single CycloneDX component to an SPDX package
+     * 
+     * @param array $component CycloneDX component
+     * @param array &$warnings Array to collect warnings
+     * @return array SPDX package
+     */
+    protected function transformComponentToPackage(array $component, array &$warnings): array
+    {
+        $package = [
+            'SPDXID' => isset($component['bom-ref']) 
+                ? 'SPDXRef-' . $component['bom-ref'] 
+                : 'SPDXRef-' . uniqid('pkg-')
+        ];
         
-        foreach ($components as $component) {
-            $package = [
-                'SPDXID' => isset($component['bom-ref']) 
-                    ? 'SPDXRef-' . $component['bom-ref'] 
-                    : 'SPDXRef-' . uniqid('pkg-')
-            ];
-            
-            // Map known fields from component to package
-            foreach (self::COMPONENT_TO_PACKAGE_MAPPINGS as $componentField => $packageField) {
-                if (!isset($component[$componentField])) {
-                    continue;
-                }
-                
-                // Handle special transformations
-                switch ($componentField) {
-                    case 'hashes':
-                        $package['checksums'] = $this->transformCycloneDxHashes($component[$componentField], $warnings);
-                        break;
-                        
-                    case 'licenses':
-                        // Extract the first license ID if available
-                        if (is_array($component[$componentField]) && !empty($component[$componentField])) {
-                            $license = $component[$componentField][0];
-                            if (isset($license['license']['id'])) {
-                                $package['licenseConcluded'] = $license['license']['id'];
-                            } elseif (isset($license['license']['name'])) {
-                                $package['licenseConcluded'] = $license['license']['name'];
-                            } else {
-                                $warnings[] = "Component license format not recognized";
-                            }
-                        }
-                        break;
-                        
-                    default:
-                        // Direct field mapping
-                        $package[$packageField] = $component[$componentField];
-                }
-            }
-            
-            // Check for unknown fields in the component
-            foreach (array_keys($component) as $field) {
-                if (!array_key_exists($field, self::COMPONENT_TO_PACKAGE_MAPPINGS) && 
-                    $field !== 'bom-ref' && $field !== 'type') {
-                    $warnings[] = "Unknown or unmapped component field: {$field}";
-                }
-            }
-            
-            // Check required fields
-            if (!isset($package['name'])) {
-                $warnings[] = "Component missing required field: name";
-                $package['name'] = 'unknown-' . uniqid();
-            }
-            
-            $packages[] = $package;
+        $package = $this->mapComponentFieldsToPackage($component, $package, $warnings);
+        $this->addUnknownComponentFieldWarnings($component, $warnings);
+        
+        if (!isset($package['name'])) {
+            $warnings[] = "Component missing required field: name";
+            $package['name'] = 'unknown-' . uniqid();
         }
         
-        return $packages;
+        return $package;
+    }
+    
+    /**
+     * Map component fields to package
+     * 
+     * @param array $component Source component
+     * @param array $package Target package
+     * @param array &$warnings Warnings array
+     * @return array Updated package
+     */
+    protected function mapComponentFieldsToPackage(array $component, array $package, array &$warnings): array
+    {
+        foreach (self::COMPONENT_TO_PACKAGE_MAPPINGS as $componentField => $packageField) {
+            if (!isset($component[$componentField])) {
+                continue;
+            }
+            
+            $package = $this->handleComponentFieldTransformation(
+                $package,
+                $componentField,
+                $packageField,
+                $component[$componentField],
+                $warnings
+            );
+        }
+        
+        return $package;
+    }
+    
+    /**
+     * Handle component field transformation
+     * 
+     * @param array $package Package to update
+     * @param string $componentField Component field name
+     * @param string $packageField Package field name
+     * @param mixed $value Field value
+     * @param array &$warnings Warnings array
+     * @return array Updated package
+     */
+    protected function handleComponentFieldTransformation(
+        array $package,
+        string $componentField,
+        string $packageField,
+        $value,
+        array &$warnings
+    ): array {
+        switch ($componentField) {
+            case 'hashes':
+                $package['checksums'] = $this->transformCycloneDxHashes($value, $warnings);
+                break;
+                
+            case 'licenses':
+                $package = $this->extractLicenseId($package, $value, $warnings);
+                break;
+                
+            default:
+                // Direct field mapping
+                $package[$packageField] = $value;
+        }
+        
+        return $package;
+    }
+    
+    /**
+     * Add warnings for unknown component fields
+     * 
+     * @param array $component Component data
+     * @param array &$warnings Warnings array
+     */
+    protected function addUnknownComponentFieldWarnings(array $component, array &$warnings): void
+    {
+        $knownFields = array_merge(array_keys(self::COMPONENT_TO_PACKAGE_MAPPINGS), ['bom-ref', 'type']);
+        $unknownFields = array_diff(array_keys($component), $knownFields);
+        
+        $warnings = array_merge(
+            $warnings,
+            array_map(function($field) {
+                return "Unknown or unmapped component field: {$field}";
+            }, $unknownFields)
+        );
+    }
+    
+    /**
+     * Extract license ID from component licenses
+     * 
+     * @param array $package Package to modify
+     * @param array $licenses Licenses array
+     * @param array &$warnings Warnings array
+     * @return array Updated package
+     */
+    protected function extractLicenseId(array $package, array $licenses, array &$warnings): array
+    {
+        if (empty($licenses)) {
+            return $package;
+        }
+        
+        $license = $licenses[0];
+        
+        if (isset($license['license']['id'])) {
+            $package['licenseConcluded'] = $license['license']['id'];
+        } elseif (isset($license['license']['name'])) {
+            $package['licenseConcluded'] = $license['license']['name'];
+        } else {
+            $warnings[] = "Component license format not recognized";
+        }
+        
+        return $package;
     }
     
     /**
@@ -534,35 +793,53 @@ class Converter
      */
     protected function transformSpdxChecksums(array $checksums, array &$warnings): array
     {
-        $hashes = [];
-        
-        foreach ($checksums as $checksum) {
-            if (!isset($checksum['algorithm']) || !isset($checksum['checksumValue'])) {
-                $warnings[] = "Malformed checksum entry in SPDX package";
-                continue;
-            }
-            
-            // Map SPDX algorithm to CycloneDX algorithm
-            $algorithm = match(strtoupper($checksum['algorithm'])) {
-                'SHA1' => 'SHA-1',
-                'SHA256' => 'SHA-256',
-                'SHA512' => 'SHA-512',
-                'MD5' => 'MD5',
-                default => null
-            };
-            
-            if ($algorithm === null) {
-                $warnings[] = "Unsupported hash algorithm: {$checksum['algorithm']}";
-                continue;
-            }
-            
-            $hashes[] = [
-                'alg' => $algorithm,
-                'content' => $checksum['checksumValue']
-            ];
+        return array_filter(array_map(function($checksum) use (&$warnings) {
+            return $this->convertSpdxChecksumToHash($checksum, $warnings);
+        }, $checksums));
+    }
+    
+    /**
+     * Convert a single SPDX checksum to a CycloneDX hash
+     * 
+     * @param array $checksum SPDX checksum
+     * @param array &$warnings Warnings array
+     * @return array|null CycloneDX hash or null if invalid
+     */
+    protected function convertSpdxChecksumToHash(array $checksum, array &$warnings): ?array
+    {
+        if (!isset($checksum['algorithm']) || !isset($checksum['checksumValue'])) {
+            $warnings[] = "Malformed checksum entry in SPDX package";
+            return null;
         }
         
-        return $hashes;
+        $algorithm = $this->mapSpdxHashAlgorithm($checksum['algorithm']);
+        
+        if ($algorithm === null) {
+            $warnings[] = "Unsupported hash algorithm: {$checksum['algorithm']}";
+            return null;
+        }
+        
+        return [
+            'alg' => $algorithm,
+            'content' => $checksum['checksumValue']
+        ];
+    }
+    
+    /**
+     * Map SPDX hash algorithm to CycloneDX algorithm
+     * 
+     * @param string $algorithm SPDX algorithm
+     * @return string|null CycloneDX algorithm or null if unsupported
+     */
+    protected function mapSpdxHashAlgorithm(string $algorithm): ?string
+    {
+        return match(strtoupper($algorithm)) {
+            'SHA1' => 'SHA-1',
+            'SHA256' => 'SHA-256',
+            'SHA512' => 'SHA-512',
+            'MD5' => 'MD5',
+            default => null
+        };
     }
     
     /**
@@ -574,35 +851,53 @@ class Converter
      */
     protected function transformCycloneDxHashes(array $hashes, array &$warnings): array
     {
-        $checksums = [];
-        
-        foreach ($hashes as $hash) {
-            if (!isset($hash['alg']) || !isset($hash['content'])) {
-                $warnings[] = "Malformed hash entry in CycloneDX component";
-                continue;
-            }
-            
-            // Map CycloneDX algorithm to SPDX algorithm
-            $algorithm = match(strtoupper($hash['alg'])) {
-                'SHA-1', 'SHA1' => 'SHA1',
-                'SHA-256', 'SHA256' => 'SHA256',
-                'SHA-512', 'SHA512' => 'SHA512',
-                'MD5' => 'MD5',
-                default => null
-            };
-            
-            if ($algorithm === null) {
-                $warnings[] = "Unsupported hash algorithm: {$hash['alg']}";
-                continue;
-            }
-            
-            $checksums[] = [
-                'algorithm' => $algorithm,
-                'checksumValue' => $hash['content']
-            ];
+        return array_filter(array_map(function($hash) use (&$warnings) {
+            return $this->convertHashToSpdxChecksum($hash, $warnings);
+        }, $hashes));
+    }
+    
+    /**
+     * Convert a single CycloneDX hash to SPDX checksum
+     * 
+     * @param array $hash CycloneDX hash
+     * @param array &$warnings Warnings array
+     * @return array|null SPDX checksum or null if invalid
+     */
+    protected function convertHashToSpdxChecksum(array $hash, array &$warnings): ?array
+    {
+        if (!isset($hash['alg']) || !isset($hash['content'])) {
+            $warnings[] = "Malformed hash entry in CycloneDX component";
+            return null;
         }
         
-        return $checksums;
+        $algorithm = $this->mapCycloneDxHashAlgorithm($hash['alg']);
+        
+        if ($algorithm === null) {
+            $warnings[] = "Unsupported hash algorithm: {$hash['alg']}";
+            return null;
+        }
+        
+        return [
+            'algorithm' => $algorithm,
+            'checksumValue' => $hash['content']
+        ];
+    }
+    
+    /**
+     * Map CycloneDX hash algorithm to SPDX algorithm
+     * 
+     * @param string $algorithm CycloneDX algorithm
+     * @return string|null SPDX algorithm or null if unsupported
+     */
+    protected function mapCycloneDxHashAlgorithm(string $algorithm): ?string
+    {
+        return match(strtoupper($algorithm)) {
+            'SHA-1', 'SHA1' => 'SHA1',
+            'SHA-256', 'SHA256' => 'SHA256',
+            'SHA-512', 'SHA512' => 'SHA512',
+            'MD5' => 'MD5',
+            default => null
+        };
     }
     
     /**
@@ -614,46 +909,97 @@ class Converter
      */
     protected function transformRelationshipsToDependencies(array $relationships, array &$warnings): array
     {
-        $dependencies = [];
-        $dependencyMap = [];
-        
-        // First pass: collect all dependency relationships
-        foreach ($relationships as $relationship) {
-            // Check if required fields exist
-            if (!isset($relationship['spdxElementId']) || 
-                !isset($relationship['relatedSpdxElement']) || 
-                !isset($relationship['relationshipType'])) {
-                $warnings[] = "Malformed relationship entry in SPDX: missing required fields";
-                continue;
-            }
-            
-            // Map only dependency relationships
-            // In SPDX, A DEPENDS_ON B means A depends on B
-            // In CycloneDX, we need to list B as a dependency of A
-            if ($relationship['relationshipType'] === self::RELATIONSHIP_DEPENDS_ON) {
-                $dependent = $this->transformSpdxId($relationship['spdxElementId']);
-                $dependency = $this->transformSpdxId($relationship['relatedSpdxElement']);
-                
-                if (!isset($dependencyMap[$dependent])) {
-                    $dependencyMap[$dependent] = [];
-                }
-                
-                $dependencyMap[$dependent][] = $dependency;
-            } elseif (str_contains(strtoupper($relationship['relationshipType']), 'DEPEND')) {
-                // Handle other dependency-related relationship types, with warning
-                $warnings[] = "Unsupported dependency relationship type: {$relationship['relationshipType']}";
-            }
-        }
-        
-        // Second pass: format into CycloneDX dependencies structure
-        foreach ($dependencyMap as $ref => $deps) {
-            $dependencies[] = [
+        $dependencyMap = $this->buildDependencyMap($relationships, $warnings);
+        return $this->formatDependencyMap($dependencyMap);
+    }
+    
+    /**
+     * Format dependency map into CycloneDX dependencies array
+     * 
+     * @param array $dependencyMap Dependency map
+     * @return array Dependencies array
+     */
+    protected function formatDependencyMap(array $dependencyMap): array
+    {
+        return array_map(function($ref, $deps) {
+            return [
                 'ref' => $ref,
                 'dependsOn' => $deps
             ];
+        }, array_keys($dependencyMap), array_values($dependencyMap));
+    }
+    
+    /**
+     * Build dependency map from relationships
+     * 
+     * @param array $relationships Relationships array
+     * @param array &$warnings Warnings array
+     * @return array Dependency map
+     */
+    protected function buildDependencyMap(array $relationships, array &$warnings): array
+    {
+        $dependencyMap = [];
+        
+        foreach ($relationships as $relationship) {
+            $this->processRelationshipForDependencyMap($relationship, $dependencyMap, $warnings);
         }
         
-        return $dependencies;
+        return $dependencyMap;
+    }
+    
+    /**
+     * Process a single relationship for dependency map
+     * 
+     * @param array $relationship Relationship data
+     * @param array &$dependencyMap Dependency map to update
+     * @param array &$warnings Warnings array
+     */
+    protected function processRelationshipForDependencyMap(
+        array $relationship, 
+        array &$dependencyMap, 
+        array &$warnings
+    ): void {
+        if (!$this->isValidRelationship($relationship)) {
+            $warnings[] = "Malformed relationship entry in SPDX: missing required fields";
+            return;
+        }
+        
+        if ($relationship['relationshipType'] === self::RELATIONSHIP_DEPENDS_ON) {
+            $this->addDependencyToMap($relationship, $dependencyMap);
+        } elseif (str_contains(strtoupper($relationship['relationshipType']), 'DEPEND')) {
+            $warnings[] = "Unsupported dependency relationship type: {$relationship['relationshipType']}";
+        }
+    }
+    
+    /**
+     * Add dependency to dependency map
+     * 
+     * @param array $relationship Relationship data
+     * @param array &$dependencyMap Dependency map to update
+     */
+    protected function addDependencyToMap(array $relationship, array &$dependencyMap): void
+    {
+        $dependent = $this->transformSpdxId($relationship['spdxElementId']);
+        $dependency = $this->transformSpdxId($relationship['relatedSpdxElement']);
+        
+        if (!isset($dependencyMap[$dependent])) {
+            $dependencyMap[$dependent] = [];
+        }
+        
+        $dependencyMap[$dependent][] = $dependency;
+    }
+    
+    /**
+     * Check if relationship has all required fields
+     * 
+     * @param array $relationship Relationship to check
+     * @return bool True if valid
+     */
+    protected function isValidRelationship(array $relationship): bool
+    {
+        return isset($relationship['spdxElementId']) && 
+               isset($relationship['relatedSpdxElement']) && 
+               isset($relationship['relationshipType']);
     }
     
     /**
@@ -665,28 +1011,47 @@ class Converter
      */
     protected function transformDependenciesToRelationships(array $dependencies, array &$warnings): array
     {
-        $relationships = [];
-        
-        foreach ($dependencies as $dependency) {
-            // Check if required fields exist
-            if (!isset($dependency['ref']) || !isset($dependency['dependsOn']) || !is_array($dependency['dependsOn'])) {
-                $warnings[] = "Malformed dependency entry in CycloneDX: missing required fields";
-                continue;
-            }
-            
-            $dependent = $this->transformSerialNumber($dependency['ref']);
-            
-            // Process each dependency
-            foreach ($dependency['dependsOn'] as $dependencyRef) {
-                $relationships[] = [
-                    'spdxElementId' => $dependent,
-                    'relatedSpdxElement' => $this->transformSerialNumber($dependencyRef),
-                    'relationshipType' => self::RELATIONSHIP_DEPENDS_ON
-                ];
-            }
+        return array_merge([], ...array_map(function($dependency) use (&$warnings) {
+            return $this->convertDependencyToRelationships($dependency, $warnings);
+        }, $dependencies));
+    }
+    
+    /**
+     * Convert a single dependency to relationships
+     * 
+     * @param array $dependency Dependency data
+     * @param array &$warnings Warnings array
+     * @return array Relationships array
+     */
+    protected function convertDependencyToRelationships(array $dependency, array &$warnings): array
+    {
+        if (!$this->isValidDependency($dependency)) {
+            $warnings[] = "Malformed dependency entry in CycloneDX: missing required fields";
+            return [];
         }
         
-        return $relationships;
+        $dependent = $this->transformSerialNumber($dependency['ref']);
+        
+        return array_map(function($dependencyRef) use ($dependent) {
+            return [
+                'spdxElementId' => $dependent,
+                'relatedSpdxElement' => $this->transformSerialNumber($dependencyRef),
+                'relationshipType' => self::RELATIONSHIP_DEPENDS_ON
+            ];
+        }, $dependency['dependsOn']);
+    }
+    
+    /**
+     * Check if dependency has all required fields
+     * 
+     * @param array $dependency Dependency to check
+     * @return bool True if valid
+     */
+    protected function isValidDependency(array $dependency): bool
+    {
+        return isset($dependency['ref']) && 
+               isset($dependency['dependsOn']) && 
+               is_array($dependency['dependsOn']);
     }
     
     /**
@@ -697,7 +1062,6 @@ class Converter
      */
     protected function transformSpdxVersion(string $spdxVersion): string
     {
-        // Simple mapping example
         return match ($spdxVersion) {
             'SPDX-2.3' => '1.4',
             'SPDX-2.2' => '1.3',
@@ -732,35 +1096,72 @@ class Converter
         ];
         
         // Extract tool information from creators
-        if (isset($creationInfo['creators']) && is_array($creationInfo['creators'])) {
-            foreach ($creationInfo['creators'] as $creator) {
-                if (strpos($creator, 'Tool:') !== 0) {
-                    continue;
-                }
-                
-                $toolInfo = trim(substr($creator, 5));
-                $parts = explode('-', $toolInfo);
-                
-                if (count($parts) < 2) {
-                    continue;
-                }
-                
-                $metadata['tools'][] = [
-                    'vendor' => $parts[0],
-                    'name' => $parts[0],
-                    'version' => $parts[1] ?? '1.0'
-                ];
-            }
+        if (!isset($creationInfo['creators']) || !is_array($creationInfo['creators'])) {
+            return $this->addDefaultTool($metadata);
         }
+        
+        $metadata['tools'] = $this->extractToolsFromCreators($creationInfo['creators']);
         
         // Add default tool if none found
         if (empty($metadata['tools'])) {
-            $metadata['tools'][] = [
-                'vendor' => 'SBOMinator',
-                'name' => 'Converter',
-                'version' => '1.0.0'
-            ];
+            $metadata = $this->addDefaultTool($metadata);
         }
+        
+        return $metadata;
+    }
+    
+    /**
+     * Extract tool information from creators array
+     * 
+     * @param array $creators Creators array
+     * @return array Tools array
+     */
+    protected function extractToolsFromCreators(array $creators): array
+    {
+        return array_filter(array_map(function($creator) {
+            return $this->extractToolFromCreator($creator);
+        }, $creators));
+    }
+    
+    /**
+     * Extract tool from creator string
+     * 
+     * @param string $creator Creator string
+     * @return array|null Tool data or null
+     */
+    protected function extractToolFromCreator(string $creator): ?array
+    {
+        if (strpos($creator, 'Tool:') !== 0) {
+            return null;
+        }
+        
+        $toolInfo = trim(substr($creator, 5));
+        $parts = explode('-', $toolInfo);
+        
+        if (count($parts) < 2) {
+            return null;
+        }
+        
+        return [
+            'vendor' => $parts[0],
+            'name' => $parts[0],
+            'version' => $parts[1] ?? '1.0'
+        ];
+    }
+    
+    /**
+     * Add default tool to metadata
+     * 
+     * @param array $metadata Metadata to update
+     * @return array Updated metadata
+     */
+    protected function addDefaultTool(array $metadata): array
+    {
+        $metadata['tools'][] = [
+            'vendor' => 'SBOMinator',
+            'name' => 'Converter',
+            'version' => '1.0.0'
+        ];
         
         return $metadata;
     }
@@ -773,7 +1174,6 @@ class Converter
      */
     protected function transformSpecVersion(string $specVersion): string
     {
-        // Simple mapping example
         return match ($specVersion) {
             '1.4' => 'SPDX-2.3',
             '1.3' => 'SPDX-2.2',
@@ -811,17 +1211,7 @@ class Converter
         
         // Extract tool information
         if (isset($metadata['tools']) && is_array($metadata['tools'])) {
-            foreach ($metadata['tools'] as $tool) {
-                if (!isset($tool['name'])) {
-                    continue;
-                }
-                
-                $vendor = $tool['vendor'] ?? '';
-                $name = $tool['name'];
-                $version = $tool['version'] ?? '1.0';
-                
-                $creationInfo['creators'][] = "Tool: {$vendor}{$name}-{$version}";
-            }
+            $creationInfo['creators'] = $this->convertToolsToCreators($metadata['tools']);
         }
         
         // Add default creator if none found
@@ -830,5 +1220,37 @@ class Converter
         }
         
         return $creationInfo;
+    }
+    
+    /**
+     * Convert tools array to creators array
+     * 
+     * @param array $tools Tools array
+     * @return array Creators array
+     */
+    protected function convertToolsToCreators(array $tools): array
+    {
+        return array_filter(array_map(function($tool) {
+            return $this->convertToolToCreator($tool);
+        }, $tools));
+    }
+    
+    /**
+     * Convert a tool to creator string
+     * 
+     * @param array $tool Tool data
+     * @return string|null Creator string or null
+     */
+    protected function convertToolToCreator(array $tool): ?string
+    {
+        if (!isset($tool['name'])) {
+            return null;
+        }
+        
+        $vendor = $tool['vendor'] ?? '';
+        $name = $tool['name'];
+        $version = $tool['version'] ?? '1.0';
+        
+        return "Tool: {$vendor}{$name}-{$version}";
     }
 }
