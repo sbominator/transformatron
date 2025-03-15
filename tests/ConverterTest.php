@@ -425,6 +425,256 @@ class ConverterTest extends TestCase
     }
     
     /**
+     * Test SPDX relationships to CycloneDX dependencies conversion
+     */
+    public function testConvertSpdxRelationshipsToCyclonedxDependencies(): void
+    {
+        $converter = new Converter();
+        
+        // Create SPDX input with relationships
+        $spdxJson = json_encode([
+            'spdxVersion' => 'SPDX-2.3',
+            'dataLicense' => 'CC0-1.0',
+            'SPDXID' => 'SPDXRef-DOCUMENT',
+            'name' => 'dependency-test-document',
+            'packages' => [
+                [
+                    'name' => 'main-package',
+                    'SPDXID' => 'SPDXRef-Package-Main',
+                    'versionInfo' => '1.0.0',
+                    'licenseConcluded' => 'MIT'
+                ],
+                [
+                    'name' => 'dependency-package',
+                    'SPDXID' => 'SPDXRef-Package-Dependency',
+                    'versionInfo' => '2.0.0',
+                    'licenseConcluded' => 'Apache-2.0'
+                ],
+                [
+                    'name' => 'transitive-dependency',
+                    'SPDXID' => 'SPDXRef-Package-Transitive',
+                    'versionInfo' => '3.0.0',
+                    'licenseConcluded' => 'BSD-3-Clause'
+                ]
+            ],
+            'relationships' => [
+                [
+                    'spdxElementId' => 'SPDXRef-Package-Main',
+                    'relatedSpdxElement' => 'SPDXRef-Package-Dependency',
+                    'relationshipType' => 'DEPENDS_ON'
+                ],
+                [
+                    'spdxElementId' => 'SPDXRef-Package-Dependency',
+                    'relatedSpdxElement' => 'SPDXRef-Package-Transitive',
+                    'relationshipType' => 'DEPENDS_ON'
+                ],
+                [
+                    'spdxElementId' => 'SPDXRef-Package-Main',
+                    'relatedSpdxElement' => 'SPDXRef-DOCUMENT',
+                    'relationshipType' => 'DESCRIBED_BY' // Non-dependency relationship
+                ],
+                [
+                    'spdxElementId' => 'SPDXRef-Package-Main',
+                    'relatedSpdxElement' => 'SPDXRef-Package-Transitive',
+                    'relationshipType' => 'DEPENDS_WEAKLY' // Unsupported dependency type
+                ]
+            ]
+        ]);
+        
+        // Perform conversion
+        $result = $converter->convertSpdxToCyclonedx($spdxJson);
+        
+        // Parse the content
+        $content = json_decode($result->getContent(), true);
+        
+        // Test dependencies array
+        $this->assertArrayHasKey('dependencies', $content);
+        $this->assertIsArray($content['dependencies']);
+        
+        // Get dependencies for easier testing
+        $dependencies = [];
+        foreach ($content['dependencies'] as $dep) {
+            $dependencies[$dep['ref']] = $dep['dependsOn'];
+        }
+        
+        // Check main package depends on dependency package
+        $this->assertArrayHasKey('Package-Main', $dependencies);
+        $this->assertContains('Package-Dependency', $dependencies['Package-Main']);
+        
+        // Check dependency package depends on transitive package
+        $this->assertArrayHasKey('Package-Dependency', $dependencies);
+        $this->assertContains('Package-Transitive', $dependencies['Package-Dependency']);
+        
+        // Check warnings for unsupported dependency type
+        $warnings = $result->getWarnings();
+        $this->assertNotEmpty($warnings);
+        $this->assertTrue(in_array('Unsupported dependency relationship type: DEPENDS_WEAKLY', $warnings));
+    }
+    
+    /**
+     * Test CycloneDX dependencies to SPDX relationships conversion
+     */
+    public function testConvertCyclonedxDependenciesToSpdxRelationships(): void
+    {
+        $converter = new Converter();
+        
+        // Create CycloneDX input with dependencies
+        $cyclonedxJson = json_encode([
+            'bomFormat' => 'CycloneDX',
+            'specVersion' => '1.4',
+            'version' => 1,
+            'serialNumber' => 'DOCUMENT-123',
+            'components' => [
+                [
+                    'type' => 'library',
+                    'bom-ref' => 'main-component',
+                    'name' => 'main-app',
+                    'version' => '1.0.0'
+                ],
+                [
+                    'type' => 'library',
+                    'bom-ref' => 'dependency-component',
+                    'name' => 'dependency-lib',
+                    'version' => '2.0.0'
+                ],
+                [
+                    'type' => 'library',
+                    'bom-ref' => 'transitive-component',
+                    'name' => 'transitive-lib',
+                    'version' => '3.0.0'
+                ]
+            ],
+            'dependencies' => [
+                [
+                    'ref' => 'main-component',
+                    'dependsOn' => [
+                        'dependency-component',
+                        'transitive-component'
+                    ]
+                ],
+                [
+                    'ref' => 'dependency-component',
+                    'dependsOn' => [
+                        'transitive-component'
+                    ]
+                ],
+                [
+                    'ref' => 'invalid-component', // Reference to component that doesn't exist
+                    'dependsOn' => [
+                        'transitive-component'
+                    ]
+                ]
+            ]
+        ]);
+        
+        // Perform conversion
+        $result = $converter->convertCyclonedxToSpdx($cyclonedxJson);
+        
+        // Parse the content
+        $content = json_decode($result->getContent(), true);
+        
+        // Test relationships array
+        $this->assertArrayHasKey('relationships', $content);
+        $this->assertIsArray($content['relationships']);
+        
+        // Count the dependency relationships
+        $dependencyRelationships = array_filter($content['relationships'], function($rel) {
+            return $rel['relationshipType'] === 'DEPENDS_ON';
+        });
+        
+        // We expect 4 relationships: main->dependency, main->transitive, dependency->transitive, invalid->transitive
+        $this->assertCount(4, $dependencyRelationships);
+        
+        // Check specific relationships
+        $mainToDependency = $this->findRelationship($content['relationships'], 'SPDXRef-main-component', 'SPDXRef-dependency-component');
+        $this->assertNotNull($mainToDependency);
+        $this->assertEquals('DEPENDS_ON', $mainToDependency['relationshipType']);
+        
+        $mainToTransitive = $this->findRelationship($content['relationships'], 'SPDXRef-main-component', 'SPDXRef-transitive-component');
+        $this->assertNotNull($mainToTransitive);
+        $this->assertEquals('DEPENDS_ON', $mainToTransitive['relationshipType']);
+        
+        $dependencyToTransitive = $this->findRelationship($content['relationships'], 'SPDXRef-dependency-component', 'SPDXRef-transitive-component');
+        $this->assertNotNull($dependencyToTransitive);
+        $this->assertEquals('DEPENDS_ON', $dependencyToTransitive['relationshipType']);
+        
+        // Invalid component reference should still be in the relationships
+        $invalidToTransitive = $this->findRelationship($content['relationships'], 'SPDXRef-invalid-component', 'SPDXRef-transitive-component');
+        $this->assertNotNull($invalidToTransitive);
+    }
+    
+    /**
+     * Helper method to find a relationship in a list of relationships
+     */
+    private function findRelationship(array $relationships, string $spdxElementId, string $relatedSpdxElement): ?array
+    {
+        foreach ($relationships as $relationship) {
+            if ($relationship['spdxElementId'] === $spdxElementId && 
+                $relationship['relatedSpdxElement'] === $relatedSpdxElement) {
+                return $relationship;
+            }
+        }
+        return null;
+    }
+    
+    /**
+     * Test conversion with empty dependencies/relationships
+     */
+    public function testConversionWithEmptyDependencies(): void
+    {
+        $converter = new Converter();
+        
+        // SPDX with no relationships
+        $spdxJson = json_encode([
+            'spdxVersion' => 'SPDX-2.3',
+            'dataLicense' => 'CC0-1.0',
+            'SPDXID' => 'SPDXRef-DOCUMENT',
+            'packages' => [
+                [
+                    'name' => 'standalone-package',
+                    'SPDXID' => 'SPDXRef-Package-1',
+                    'versionInfo' => '1.0.0'
+                ]
+            ]
+            // No relationships defined
+        ]);
+        
+        // Perform conversion
+        $result = $converter->convertSpdxToCyclonedx($spdxJson);
+        
+        // Parse the content
+        $content = json_decode($result->getContent(), true);
+        
+        // No dependencies should be created
+        $this->assertArrayNotHasKey('dependencies', $content);
+        
+        // CycloneDX with empty dependencies array
+        $cyclonedxJson = json_encode([
+            'bomFormat' => 'CycloneDX',
+            'specVersion' => '1.4',
+            'components' => [
+                [
+                    'type' => 'library',
+                    'bom-ref' => 'component-1',
+                    'name' => 'standalone-component',
+                    'version' => '1.0.0'
+                ]
+            ],
+            'dependencies' => [] // Empty dependencies array
+        ]);
+        
+        // Perform conversion
+        $result = $converter->convertCyclonedxToSpdx($cyclonedxJson);
+        
+        // Parse the content
+        $content = json_decode($result->getContent(), true);
+        
+        // Empty relationships array should be created
+        $this->assertArrayHasKey('relationships', $content);
+        $this->assertEmpty($content['relationships']);
+    }
+    
+    /**
      * Test conversion with missing required fields
      */
     public function testConversionWithMissingRequiredFields(): void

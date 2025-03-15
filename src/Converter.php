@@ -15,7 +15,8 @@ class Converter
         'SPDXID' => ['field' => 'serialNumber', 'transform' => 'transformSpdxId'],
         'documentNamespace' => ['field' => 'documentNamespace', 'transform' => null],
         'creationInfo' => ['field' => 'metadata', 'transform' => 'transformCreationInfo'],
-        'packages' => ['field' => 'components', 'transform' => 'transformPackagesToComponents']
+        'packages' => ['field' => 'components', 'transform' => 'transformPackagesToComponents'],
+        'relationships' => ['field' => 'dependencies', 'transform' => 'transformRelationshipsToDependencies']
     ];
     
     // CycloneDX to SPDX field mappings
@@ -26,7 +27,8 @@ class Converter
         'serialNumber' => ['field' => 'SPDXID', 'transform' => 'transformSerialNumber'],
         'name' => ['field' => 'name', 'transform' => null],
         'metadata' => ['field' => 'creationInfo', 'transform' => 'transformMetadata'],
-        'components' => ['field' => 'packages', 'transform' => 'transformComponentsToPackages']
+        'components' => ['field' => 'packages', 'transform' => 'transformComponentsToPackages'],
+        'dependencies' => ['field' => 'relationships', 'transform' => 'transformDependenciesToRelationships']
     ];
     
     // SPDX package field to CycloneDX component field mappings
@@ -90,8 +92,8 @@ class Converter
                 
                 // Apply transformation if needed
                 if ($mapping['transform'] !== null && method_exists($this, $mapping['transform'])) {
-                    if ($spdxField === 'packages') {
-                        // For packages, we need to pass the warnings array by reference
+                    if ($spdxField === 'packages' || $spdxField === 'relationships') {
+                        // For packages and relationships, we need to pass the warnings array by reference
                         $value = $this->{$mapping['transform']}($value, $warnings);
                     } else {
                         $value = $this->{$mapping['transform']}($value);
@@ -164,8 +166,8 @@ class Converter
                 
                 // Apply transformation if needed
                 if ($mapping['transform'] !== null && method_exists($this, $mapping['transform'])) {
-                    if ($cyclonedxField === 'components') {
-                        // For components, we need to pass the warnings array by reference
+                    if ($cyclonedxField === 'components' || $cyclonedxField === 'dependencies') {
+                        // For components and dependencies, we need to pass the warnings array by reference
                         $value = $this->{$mapping['transform']}($value, $warnings);
                     } else {
                         $value = $this->{$mapping['transform']}($value);
@@ -591,5 +593,87 @@ class Converter
         }
         
         return $creationInfo;
+    }
+    
+    /**
+     * Transform SPDX relationships to CycloneDX dependencies
+     * 
+     * @param array $relationships SPDX relationships array
+     * @param array &$warnings Array to collect warnings during conversion
+     * @return array CycloneDX dependencies array
+     */
+    protected function transformRelationshipsToDependencies(array $relationships, array &$warnings): array
+    {
+        $dependencies = [];
+        $dependencyMap = [];
+        
+        // First pass: collect all dependency relationships
+        foreach ($relationships as $relationship) {
+            // Check if required fields exist
+            if (!isset($relationship['spdxElementId']) || !isset($relationship['relatedSpdxElement']) || !isset($relationship['relationshipType'])) {
+                $warnings[] = "Malformed relationship entry in SPDX: missing required fields";
+                continue;
+            }
+            
+            // Map only dependency relationships
+            // In SPDX, A DEPENDS_ON B means A depends on B
+            // In CycloneDX, we need to list B as a dependency of A
+            if ($relationship['relationshipType'] === 'DEPENDS_ON') {
+                $dependent = $this->transformSpdxId($relationship['spdxElementId']);
+                $dependency = $this->transformSpdxId($relationship['relatedSpdxElement']);
+                
+                if (!isset($dependencyMap[$dependent])) {
+                    $dependencyMap[$dependent] = [];
+                }
+                
+                $dependencyMap[$dependent][] = $dependency;
+            } elseif (str_contains(strtoupper($relationship['relationshipType']), 'DEPEND')) {
+                // Handle other dependency-related relationship types, with warning
+                $warnings[] = "Unsupported dependency relationship type: {$relationship['relationshipType']}";
+            }
+        }
+        
+        // Second pass: format into CycloneDX dependencies structure
+        foreach ($dependencyMap as $ref => $deps) {
+            $dependencies[] = [
+                'ref' => $ref,
+                'dependsOn' => $deps
+            ];
+        }
+        
+        return $dependencies;
+    }
+    
+    /**
+     * Transform CycloneDX dependencies to SPDX relationships
+     * 
+     * @param array $dependencies CycloneDX dependencies array
+     * @param array &$warnings Array to collect warnings during conversion
+     * @return array SPDX relationships array
+     */
+    protected function transformDependenciesToRelationships(array $dependencies, array &$warnings): array
+    {
+        $relationships = [];
+        
+        foreach ($dependencies as $dependency) {
+            // Check if required fields exist
+            if (!isset($dependency['ref']) || !isset($dependency['dependsOn']) || !is_array($dependency['dependsOn'])) {
+                $warnings[] = "Malformed dependency entry in CycloneDX: missing required fields";
+                continue;
+            }
+            
+            $dependent = $this->transformSerialNumber($dependency['ref']);
+            
+            // Process each dependency
+            foreach ($dependency['dependsOn'] as $dependencyRef) {
+                $relationships[] = [
+                    'spdxElementId' => $dependent,
+                    'relatedSpdxElement' => $this->transformSerialNumber($dependencyRef),
+                    'relationshipType' => 'DEPENDS_ON'
+                ];
+            }
+        }
+        
+        return $relationships;
     }
 }
