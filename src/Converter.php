@@ -88,6 +88,14 @@ class Converter
         'specVersion',
         'version'
     ];
+    
+    /**
+     * Constructor for the Converter class
+     */
+    public function __construct()
+    {
+        // No initialization needed at this time
+    }
 
     /**
      * Convert SPDX format to CycloneDX format
@@ -117,26 +125,32 @@ class Converter
             
             // Map fields from SPDX to CycloneDX
             foreach (self::SPDX_TO_CYCLONEDX_MAPPINGS as $spdxField => $mapping) {
-                if (isset($spdxData[$spdxField])) {
-                    $value = $spdxData[$spdxField];
-                    
-                    // Apply transformation if needed
-                    if ($mapping['transform'] !== null && method_exists($this, $mapping['transform'])) {
-                        if ($spdxField === 'packages' || $spdxField === 'relationships') {
-                            // For packages and relationships, we need to pass the warnings array by reference
-                            $value = $this->{$mapping['transform']}($value, $warnings);
-                        } else {
-                            $value = $this->{$mapping['transform']}($value);
-                        }
+                if (!isset($spdxData[$spdxField])) {
+                    if (in_array($spdxField, self::REQUIRED_SPDX_FIELDS)) {
+                        $warnings[] = "Missing required SPDX field: {$spdxField}";
                     }
-                    
-                    // Set the value in CycloneDX data
-                    if ($mapping['field'] !== null) {
-                        $cyclonedxData[$mapping['field']] = $value;
-                    }
-                } else if (in_array($spdxField, self::REQUIRED_SPDX_FIELDS)) {
-                    $warnings[] = "Missing required SPDX field: {$spdxField}";
+                    continue;
                 }
+                
+                $value = $spdxData[$spdxField];
+                
+                // Skip if no target field is defined
+                if ($mapping['field'] === null) {
+                    continue;
+                }
+                
+                // Apply transformation if needed
+                if ($mapping['transform'] !== null && method_exists($this, $mapping['transform'])) {
+                    if ($spdxField === 'packages' || $spdxField === 'relationships') {
+                        // For packages and relationships, we need to pass the warnings array by reference
+                        $value = $this->{$mapping['transform']}($value, $warnings);
+                    } else {
+                        $value = $this->{$mapping['transform']}($value);
+                    }
+                }
+                
+                // Set the value in CycloneDX data
+                $cyclonedxData[$mapping['field']] = $value;
             }
             
             // Check for unknown fields in SPDX
@@ -209,26 +223,32 @@ class Converter
             
             // Map fields from CycloneDX to SPDX
             foreach (self::CYCLONEDX_TO_SPDX_MAPPINGS as $cyclonedxField => $mapping) {
-                if (isset($cyclonedxData[$cyclonedxField])) {
-                    $value = $cyclonedxData[$cyclonedxField];
-                    
-                    // Apply transformation if needed
-                    if ($mapping['transform'] !== null && method_exists($this, $mapping['transform'])) {
-                        if ($cyclonedxField === 'components' || $cyclonedxField === 'dependencies') {
-                            // For components and dependencies, we need to pass the warnings array by reference
-                            $value = $this->{$mapping['transform']}($value, $warnings);
-                        } else {
-                            $value = $this->{$mapping['transform']}($value);
-                        }
+                if (!isset($cyclonedxData[$cyclonedxField])) {
+                    if (in_array($cyclonedxField, self::REQUIRED_CYCLONEDX_FIELDS)) {
+                        $warnings[] = "Missing required CycloneDX field: {$cyclonedxField}";
                     }
-                    
-                    // Set the value in SPDX data
-                    if ($mapping['field'] !== null) {
-                        $spdxData[$mapping['field']] = $value;
-                    }
-                } else if (in_array($cyclonedxField, self::REQUIRED_CYCLONEDX_FIELDS)) {
-                    $warnings[] = "Missing required CycloneDX field: {$cyclonedxField}";
+                    continue;
                 }
+                
+                $value = $cyclonedxData[$cyclonedxField];
+                
+                // Skip if no target field is defined
+                if ($mapping['field'] === null) {
+                    continue;
+                }
+                
+                // Apply transformation if needed
+                if ($mapping['transform'] !== null && method_exists($this, $mapping['transform'])) {
+                    if ($cyclonedxField === 'components' || $cyclonedxField === 'dependencies') {
+                        // For components and dependencies, we need to pass the warnings array by reference
+                        $value = $this->{$mapping['transform']}($value, $warnings);
+                    } else {
+                        $value = $this->{$mapping['transform']}($value);
+                    }
+                }
+                
+                // Set the value in SPDX data
+                $spdxData[$mapping['field']] = $value;
             }
             
             // Check for unknown fields in CycloneDX
@@ -311,12 +331,14 @@ class Converter
             }
         }
         
-        if (!empty($missingFields)) {
-            throw new ValidationException(
-                'Missing required SPDX fields: ' . implode(', ', $missingFields),
-                ['missing_fields' => $missingFields]
-            );
+        if (empty($missingFields)) {
+            return;
         }
+        
+        throw new ValidationException(
+            'Missing required SPDX fields: ' . implode(', ', $missingFields),
+            ['missing_fields' => $missingFields]
+        );
     }
     
     /**
@@ -343,9 +365,9 @@ class Converter
         }
         
         // Extra validation for specific fields
-        if (isset($data['bomFormat']) && $data['bomFormat'] !== 'CycloneDX') {
+        if (!isset($data['bomFormat']) || $data['bomFormat'] !== 'CycloneDX') {
             throw new ValidationException(
-                'Invalid CycloneDX bomFormat: ' . $data['bomFormat'],
+                'Invalid CycloneDX bomFormat: ' . ($data['bomFormat'] ?? 'missing'),
                 ['invalid_field' => 'bomFormat']
             );
         }
@@ -370,45 +392,47 @@ class Converter
             
             // Map known fields from package to component
             foreach (self::PACKAGE_TO_COMPONENT_MAPPINGS as $packageField => $componentField) {
-                if (isset($package[$packageField])) {
-                    // Handle special transformations
-                    switch ($packageField) {
-                        case 'checksums':
-                            $component['hashes'] = $this->transformSpdxChecksums($package[$packageField], $warnings);
-                            break;
+                if (!isset($package[$packageField])) {
+                    continue;
+                }
+                
+                // Handle special transformations
+                switch ($packageField) {
+                    case 'checksums':
+                        $component['hashes'] = $this->transformSpdxChecksums($package[$packageField], $warnings);
+                        break;
+                    
+                    case 'packageVerificationCode':
+                        if (!isset($component['hashes'])) {
+                            $component['hashes'] = [];
+                        }
                         
-                        case 'packageVerificationCode':
-                            if (!isset($component['hashes'])) {
-                                $component['hashes'] = [];
-                            }
-                            
-                            // Add verification code as a hash
-                            if (isset($package[$packageField]['value'])) {
-                                $component['hashes'][] = [
-                                    'alg' => 'SHA1',
-                                    'content' => $package[$packageField]['value']
-                                ];
-                            }
-                            break;
-                        
-                        case 'licenseConcluded':
-                        case 'licenseDeclared':
-                            // Only process if licenses haven't been set yet
-                            if (!isset($component['licenses']) && !empty($package[$packageField])) {
-                                $component['licenses'] = [
-                                    [
-                                        'license' => [
-                                            'id' => $package[$packageField]
-                                        ]
+                        // Add verification code as a hash
+                        if (isset($package[$packageField]['value'])) {
+                            $component['hashes'][] = [
+                                'alg' => 'SHA1',
+                                'content' => $package[$packageField]['value']
+                            ];
+                        }
+                        break;
+                    
+                    case 'licenseConcluded':
+                    case 'licenseDeclared':
+                        // Only process if licenses haven't been set yet
+                        if (!isset($component['licenses']) && !empty($package[$packageField])) {
+                            $component['licenses'] = [
+                                [
+                                    'license' => [
+                                        'id' => $package[$packageField]
                                     ]
-                                ];
-                            }
-                            break;
-                            
-                        default:
-                            // Direct field mapping
-                            $component[$componentField] = $package[$packageField];
-                    }
+                                ]
+                            ];
+                        }
+                        break;
+                        
+                    default:
+                        // Direct field mapping
+                        $component[$componentField] = $package[$packageField];
                 }
             }
             
@@ -451,31 +475,33 @@ class Converter
             
             // Map known fields from component to package
             foreach (self::COMPONENT_TO_PACKAGE_MAPPINGS as $componentField => $packageField) {
-                if (isset($component[$componentField])) {
-                    // Handle special transformations
-                    switch ($componentField) {
-                        case 'hashes':
-                            $package['checksums'] = $this->transformCycloneDxHashes($component[$componentField], $warnings);
-                            break;
-                            
-                        case 'licenses':
-                            // Extract the first license ID if available
-                            if (is_array($component[$componentField]) && !empty($component[$componentField])) {
-                                $license = $component[$componentField][0];
-                                if (isset($license['license']['id'])) {
-                                    $package['licenseConcluded'] = $license['license']['id'];
-                                } elseif (isset($license['license']['name'])) {
-                                    $package['licenseConcluded'] = $license['license']['name'];
-                                } else {
-                                    $warnings[] = "Component license format not recognized";
-                                }
+                if (!isset($component[$componentField])) {
+                    continue;
+                }
+                
+                // Handle special transformations
+                switch ($componentField) {
+                    case 'hashes':
+                        $package['checksums'] = $this->transformCycloneDxHashes($component[$componentField], $warnings);
+                        break;
+                        
+                    case 'licenses':
+                        // Extract the first license ID if available
+                        if (is_array($component[$componentField]) && !empty($component[$componentField])) {
+                            $license = $component[$componentField][0];
+                            if (isset($license['license']['id'])) {
+                                $package['licenseConcluded'] = $license['license']['id'];
+                            } elseif (isset($license['license']['name'])) {
+                                $package['licenseConcluded'] = $license['license']['name'];
+                            } else {
+                                $warnings[] = "Component license format not recognized";
                             }
-                            break;
-                            
-                        default:
-                            // Direct field mapping
-                            $package[$packageField] = $component[$componentField];
-                    }
+                        }
+                        break;
+                        
+                    default:
+                        // Direct field mapping
+                        $package[$packageField] = $component[$componentField];
                 }
             }
             
@@ -511,27 +537,29 @@ class Converter
         $hashes = [];
         
         foreach ($checksums as $checksum) {
-            if (isset($checksum['algorithm']) && isset($checksum['checksumValue'])) {
-                // Map SPDX algorithm to CycloneDX algorithm
-                $algorithm = match(strtoupper($checksum['algorithm'])) {
-                    'SHA1' => 'SHA-1',
-                    'SHA256' => 'SHA-256',
-                    'SHA512' => 'SHA-512',
-                    'MD5' => 'MD5',
-                    default => null
-                };
-                
-                if ($algorithm) {
-                    $hashes[] = [
-                        'alg' => $algorithm,
-                        'content' => $checksum['checksumValue']
-                    ];
-                } else {
-                    $warnings[] = "Unsupported hash algorithm: {$checksum['algorithm']}";
-                }
-            } else {
+            if (!isset($checksum['algorithm']) || !isset($checksum['checksumValue'])) {
                 $warnings[] = "Malformed checksum entry in SPDX package";
+                continue;
             }
+            
+            // Map SPDX algorithm to CycloneDX algorithm
+            $algorithm = match(strtoupper($checksum['algorithm'])) {
+                'SHA1' => 'SHA-1',
+                'SHA256' => 'SHA-256',
+                'SHA512' => 'SHA-512',
+                'MD5' => 'MD5',
+                default => null
+            };
+            
+            if ($algorithm === null) {
+                $warnings[] = "Unsupported hash algorithm: {$checksum['algorithm']}";
+                continue;
+            }
+            
+            $hashes[] = [
+                'alg' => $algorithm,
+                'content' => $checksum['checksumValue']
+            ];
         }
         
         return $hashes;
@@ -549,27 +577,29 @@ class Converter
         $checksums = [];
         
         foreach ($hashes as $hash) {
-            if (isset($hash['alg']) && isset($hash['content'])) {
-                // Map CycloneDX algorithm to SPDX algorithm
-                $algorithm = match(strtoupper($hash['alg'])) {
-                    'SHA-1', 'SHA1' => 'SHA1',
-                    'SHA-256', 'SHA256' => 'SHA256',
-                    'SHA-512', 'SHA512' => 'SHA512',
-                    'MD5' => 'MD5',
-                    default => null
-                };
-                
-                if ($algorithm) {
-                    $checksums[] = [
-                        'algorithm' => $algorithm,
-                        'checksumValue' => $hash['content']
-                    ];
-                } else {
-                    $warnings[] = "Unsupported hash algorithm: {$hash['alg']}";
-                }
-            } else {
+            if (!isset($hash['alg']) || !isset($hash['content'])) {
                 $warnings[] = "Malformed hash entry in CycloneDX component";
+                continue;
             }
+            
+            // Map CycloneDX algorithm to SPDX algorithm
+            $algorithm = match(strtoupper($hash['alg'])) {
+                'SHA-1', 'SHA1' => 'SHA1',
+                'SHA-256', 'SHA256' => 'SHA256',
+                'SHA-512', 'SHA512' => 'SHA512',
+                'MD5' => 'MD5',
+                default => null
+            };
+            
+            if ($algorithm === null) {
+                $warnings[] = "Unsupported hash algorithm: {$hash['alg']}";
+                continue;
+            }
+            
+            $checksums[] = [
+                'algorithm' => $algorithm,
+                'checksumValue' => $hash['content']
+            ];
         }
         
         return $checksums;
@@ -590,7 +620,9 @@ class Converter
         // First pass: collect all dependency relationships
         foreach ($relationships as $relationship) {
             // Check if required fields exist
-            if (!isset($relationship['spdxElementId']) || !isset($relationship['relatedSpdxElement']) || !isset($relationship['relationshipType'])) {
+            if (!isset($relationship['spdxElementId']) || 
+                !isset($relationship['relatedSpdxElement']) || 
+                !isset($relationship['relationshipType'])) {
                 $warnings[] = "Malformed relationship entry in SPDX: missing required fields";
                 continue;
             }
@@ -702,18 +734,22 @@ class Converter
         // Extract tool information from creators
         if (isset($creationInfo['creators']) && is_array($creationInfo['creators'])) {
             foreach ($creationInfo['creators'] as $creator) {
-                if (strpos($creator, 'Tool:') === 0) {
-                    $toolInfo = trim(substr($creator, 5));
-                    $parts = explode('-', $toolInfo);
-                    
-                    if (count($parts) >= 2) {
-                        $metadata['tools'][] = [
-                            'vendor' => $parts[0],
-                            'name' => $parts[0],
-                            'version' => $parts[1] ?? '1.0'
-                        ];
-                    }
+                if (strpos($creator, 'Tool:') !== 0) {
+                    continue;
                 }
+                
+                $toolInfo = trim(substr($creator, 5));
+                $parts = explode('-', $toolInfo);
+                
+                if (count($parts) < 2) {
+                    continue;
+                }
+                
+                $metadata['tools'][] = [
+                    'vendor' => $parts[0],
+                    'name' => $parts[0],
+                    'version' => $parts[1] ?? '1.0'
+                ];
             }
         }
         
@@ -776,13 +812,15 @@ class Converter
         // Extract tool information
         if (isset($metadata['tools']) && is_array($metadata['tools'])) {
             foreach ($metadata['tools'] as $tool) {
-                if (isset($tool['name'])) {
-                    $vendor = $tool['vendor'] ?? '';
-                    $name = $tool['name'];
-                    $version = $tool['version'] ?? '1.0';
-                    
-                    $creationInfo['creators'][] = "Tool: {$vendor}{$name}-{$version}";
+                if (!isset($tool['name'])) {
+                    continue;
                 }
+                
+                $vendor = $tool['vendor'] ?? '';
+                $name = $tool['name'];
+                $version = $tool['version'] ?? '1.0';
+                
+                $creationInfo['creators'][] = "Tool: {$vendor}{$name}-{$version}";
             }
         }
         
