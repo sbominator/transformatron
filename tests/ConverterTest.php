@@ -119,82 +119,140 @@ class ConverterTest extends TestCase
     }
     
     /**
-     * Test SPDX to CycloneDX conversion
+     * Test SPDX to CycloneDX conversion with field mapping
      */
-    public function testConvertSpdxToCyclonedx(): void
+    public function testConvertSpdxToCyclonedxFieldMapping(): void
     {
         $converter = new Converter();
         
-        // Minimal valid SPDX
+        // Create SPDX input with known fields for mapping
         $spdxJson = json_encode([
             'spdxVersion' => 'SPDX-2.3',
             'dataLicense' => 'CC0-1.0',
             'SPDXID' => 'SPDXRef-DOCUMENT',
             'name' => 'test-document',
-            'documentNamespace' => 'https://example.com/test'
+            'documentNamespace' => 'https://example.com/test',
+            'creationInfo' => [
+                'created' => '2023-01-01T12:00:00Z',
+                'creators' => [
+                    'Tool: ExampleTool-1.0'
+                ]
+            ],
+            'nonMappableField' => 'This field has no direct mapping',
+            'anotherCustomField' => 'Another unmapped field'
         ]);
         
         // Perform conversion
         $result = $converter->convertSpdxToCyclonedx($spdxJson);
         
-        // Assert results
+        // Assert basic result properties
         $this->assertInstanceOf(ConversionResult::class, $result);
         $this->assertEquals('CycloneDX', $result->getFormat());
         
-        // Check content is valid JSON
+        // Parse the content
         $content = json_decode($result->getContent(), true);
-        $this->assertIsArray($content);
         
-        // Verify placeholder content
-        $this->assertArrayHasKey('bomFormat', $content);
-        $this->assertEquals('CycloneDX', $content['bomFormat']);
-        $this->assertArrayHasKey('specVersion', $content);
-        $this->assertArrayHasKey('serialNumber', $content);
-        $this->assertArrayHasKey('metadata', $content);
-        $this->assertArrayHasKey('tools', $content['metadata']);
-        $this->assertArrayHasKey('original', $content);
-        $this->assertEquals('Converted from SPDX format', $content['original']);
+        // Test mapped fields
+        $this->assertEquals('1.4', $content['specVersion']); // Transformed from SPDX-2.3
+        $this->assertEquals('CC0-1.0', $content['license']); // Direct mapping
+        $this->assertEquals('test-document', $content['name']); // Direct mapping
+        $this->assertEquals('DOCUMENT', $content['serialNumber']); // Transformed from SPDXRef-DOCUMENT
+        $this->assertEquals('https://example.com/test', $content['documentNamespace']); // Direct mapping
+        
+        // Test that warnings were generated for unmapped fields
+        $warnings = $result->getWarnings();
+        $this->assertNotEmpty($warnings);
+        
+        // Check for specific warning messages
+        $this->assertTrue(in_array('Unknown or unmapped SPDX field: nonMappableField', $warnings));
+        $this->assertTrue(in_array('Unknown or unmapped SPDX field: anotherCustomField', $warnings));
     }
     
     /**
-     * Test CycloneDX to SPDX conversion
+     * Test CycloneDX to SPDX conversion with field mapping
      */
-    public function testConvertCyclonedxToSpdx(): void
+    public function testConvertCyclonedxToSpdxFieldMapping(): void
     {
         $converter = new Converter();
         
-        // Minimal valid CycloneDX
+        // Create CycloneDX input with known fields for mapping
         $cyclonedxJson = json_encode([
             'bomFormat' => 'CycloneDX',
             'specVersion' => '1.4',
             'version' => 1,
-            'serialNumber' => 'test-serial-number',
+            'serialNumber' => 'DOCUMENT-123',
+            'name' => 'test-cyclonedx-document',
             'metadata' => [
-                'timestamp' => '2023-01-01T00:00:00Z'
-            ]
+                'timestamp' => '2023-02-01T12:00:00Z',
+                'tools' => [
+                    [
+                        'vendor' => 'Example',
+                        'name' => 'Tool',
+                        'version' => '2.0'
+                    ]
+                ]
+            ],
+            'unmappedField' => 'This field has no mapping',
+            'components' => [] // Known field but not mapped in our implementation
         ]);
         
         // Perform conversion
         $result = $converter->convertCyclonedxToSpdx($cyclonedxJson);
         
-        // Assert results
+        // Assert basic result properties
         $this->assertInstanceOf(ConversionResult::class, $result);
         $this->assertEquals('SPDX', $result->getFormat());
         
-        // Check content is valid JSON
+        // Parse the content
         $content = json_decode($result->getContent(), true);
-        $this->assertIsArray($content);
         
-        // Verify placeholder content
-        $this->assertArrayHasKey('spdxVersion', $content);
-        $this->assertEquals('SPDX-2.3', $content['spdxVersion']);
-        $this->assertArrayHasKey('dataLicense', $content);
-        $this->assertEquals('CC0-1.0', $content['dataLicense']);
-        $this->assertArrayHasKey('SPDXID', $content);
+        // Test mapped fields
+        $this->assertEquals('SPDX-2.3', $content['spdxVersion']); // Transformed from 1.4
+        $this->assertEquals('test-cyclonedx-document', $content['name']); // Direct mapping
+        $this->assertEquals('SPDXRef-DOCUMENT-123', $content['SPDXID']); // Transformed from DOCUMENT-123
+        
+        // Test that metadata was properly transformed to creationInfo
         $this->assertArrayHasKey('creationInfo', $content);
-        $this->assertArrayHasKey('packages', $content);
-        $this->assertArrayHasKey('original', $content);
-        $this->assertEquals('Converted from CycloneDX format', $content['original']);
+        $this->assertEquals('2023-02-01T12:00:00Z', $content['creationInfo']['created']);
+        $this->assertContains('Tool: ExampleTool-2.0', $content['creationInfo']['creators']);
+        
+        // Test that warnings were generated for unmapped fields
+        $warnings = $result->getWarnings();
+        $this->assertNotEmpty($warnings);
+        
+        // Check for specific warning messages
+        $this->assertTrue(in_array('Unknown or unmapped CycloneDX field: unmappedField', $warnings));
+        $this->assertTrue(in_array('Unknown or unmapped CycloneDX field: components', $warnings));
+    }
+    
+    /**
+     * Test ConversionResult with warnings functionality
+     */
+    public function testConversionResultWarnings(): void
+    {
+        // Test empty warnings
+        $result = new ConversionResult('content', 'format');
+        $this->assertEmpty($result->getWarnings());
+        $this->assertFalse($result->hasWarnings());
+        
+        // Test with initial warnings
+        $warnings = ['Warning 1', 'Warning 2'];
+        $result = new ConversionResult('content', 'format', $warnings);
+        $this->assertEquals($warnings, $result->getWarnings());
+        $this->assertTrue($result->hasWarnings());
+        
+        // Test adding warnings
+        $result = new ConversionResult('content', 'format');
+        $result->addWarning('New warning');
+        $this->assertEquals(['New warning'], $result->getWarnings());
+        $this->assertTrue($result->hasWarnings());
+        
+        // Test JSON serialization includes warnings
+        $result = new ConversionResult(json_encode(['test' => 'value']), 'format', ['Warning']);
+        $serialized = json_encode($result);
+        $deserialized = json_decode($serialized, true);
+        $this->assertArrayHasKey('warnings', $deserialized);
+        $this->assertEquals(['Warning'], $deserialized['warnings']);
     }
     
     /**

@@ -18,15 +18,22 @@ class ConversionResult implements \JsonSerializable
     private string $format;
     
     /**
+     * @var array Warnings generated during conversion
+     */
+    private array $warnings = [];
+    
+    /**
      * Constructor for the ConversionResult class
      * 
      * @param string $content The converted SBOM content
      * @param string $format The format of the converted SBOM
+     * @param array $warnings Warnings generated during conversion
      */
-    public function __construct(string $content, string $format)
+    public function __construct(string $content, string $format, array $warnings = [])
     {
         $this->content = $content;
         $this->format = $format;
+        $this->warnings = $warnings;
     }
     
     /**
@@ -50,6 +57,38 @@ class ConversionResult implements \JsonSerializable
     }
     
     /**
+     * Get the warnings generated during conversion
+     * 
+     * @return array
+     */
+    public function getWarnings(): array
+    {
+        return $this->warnings;
+    }
+    
+    /**
+     * Add a warning to the warnings list
+     * 
+     * @param string $warning The warning message
+     * @return self
+     */
+    public function addWarning(string $warning): self
+    {
+        $this->warnings[] = $warning;
+        return $this;
+    }
+    
+    /**
+     * Check if there are any warnings
+     * 
+     * @return bool
+     */
+    public function hasWarnings(): bool
+    {
+        return !empty($this->warnings);
+    }
+    
+    /**
      * Specify data which should be serialized to JSON
      * 
      * @return array
@@ -58,7 +97,8 @@ class ConversionResult implements \JsonSerializable
     {
         return [
             'format' => $this->format,
-            'content' => json_decode($this->content, true)
+            'content' => json_decode($this->content, true),
+            'warnings' => $this->warnings
         ];
     }
 }
