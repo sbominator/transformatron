@@ -1,0 +1,4 @@
+/vendor
+/composer.lock
+/repomix-output.txt
+.phpunit.result.cache

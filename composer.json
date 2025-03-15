@@ -1,0 +1,25 @@
+{
+    "name": "sbominator/converter",
+    "description": "A PHP library to convert SBOMs between SPDX and CycloneDX formats",
+    "type": "library",
+    "license": "MIT",
+    "autoload": {
+        "psr-4": {
+            "SBOMinator\\Converter\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "SBOMinator\\Converter\\Tests\\": "tests/"
+        }
+    },
+    "require": {
+        "php": "^7.4|^8.0"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^9.0"
+    },
+    "scripts": {
+        "test": "phpunit"
+    }
+}
