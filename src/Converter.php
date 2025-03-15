@@ -118,15 +118,13 @@ class Converter
             
             $cyclonedxContent = json_encode($cyclonedxData, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
             return new ConversionResult($cyclonedxContent, self::FORMAT_CYCLONEDX, $warnings);
-        } catch (ValidationException $e) {
-            throw $e;
-        } catch (\Exception $e) {
+        } catch (ValidationException $exception) {
+            throw $exception;
+        } catch (\Exception $exception) {
             throw new ConversionException(
-                'Failed to convert SPDX to CycloneDX: ' . $e->getMessage(),
+                'Failed to convert SPDX to CycloneDX: ' . $exception->getMessage(),
                 self::FORMAT_SPDX,
-                self::FORMAT_CYCLONEDX,
-                0,
-                $e
+                self::FORMAT_CYCLONEDX
             );
         }
     }
@@ -172,15 +170,13 @@ class Converter
             
             $spdxContent = json_encode($spdxData, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
             return new ConversionResult($spdxContent, self::FORMAT_SPDX, $warnings);
-        } catch (ValidationException $e) {
-            throw $e;
-        } catch (\Exception $e) {
+        } catch (ValidationException $exception) {
+            throw $exception;
+        } catch (\Exception $exception) {
             throw new ConversionException(
-                'Failed to convert CycloneDX to SPDX: ' . $e->getMessage(),
+                'Failed to convert CycloneDX to SPDX: ' . $exception->getMessage(),
                 self::FORMAT_CYCLONEDX,
-                self::FORMAT_SPDX,
-                0,
-                $e
+                self::FORMAT_SPDX
             );
         }
     }
