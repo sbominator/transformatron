@@ -2,6 +2,9 @@
 
 namespace SBOMinator\Converter;
 
+use SBOMinator\Converter\Exception\ConversionException;
+use SBOMinator\Converter\Exception\ValidationException;
+
 /**
  * Main converter class for transforming between SPDX and CycloneDX formats
  */

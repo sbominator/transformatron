@@ -20,8 +20,8 @@ composer require sbominator/converter
 <?php
 
 use SBOMinator\Converter\Converter;
-use SBOMinator\Converter\ValidationException;
-use SBOMinator\Converter\ConversionException;
+use SBOMinator\Converter\Exception\ConversionException;
+use SBOMinator\Converter\Exception\ValidationException;
 
 // Create a converter instance
 $converter = new Converter();

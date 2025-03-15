@@ -3,10 +3,10 @@
 namespace SBOMinator\Converter\Tests;
 
 use PHPUnit\Framework\TestCase;
-use SBOMinator\Converter\Converter;
 use SBOMinator\Converter\ConversionResult;
-use SBOMinator\Converter\ValidationException;
-use SBOMinator\Converter\ConversionException;
+use SBOMinator\Converter\Converter;
+use SBOMinator\Converter\Exception\ConversionException;
+use SBOMinator\Converter\Exception\ValidationException;
 
 class ConverterTest extends TestCase
 {

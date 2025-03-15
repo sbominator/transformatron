@@ -3,10 +3,8 @@
 namespace SBOMinator\Converter\Tests;
 
 use PHPUnit\Framework\TestCase;
-use SBOMinator\Converter\Converter;
 use SBOMinator\Converter\ConversionResult;
-use SBOMinator\Converter\ValidationException;
-use SBOMinator\Converter\ConversionException;
+use SBOMinator\Converter\Converter;
 
 /**
  * End-to-end tests for verifying conversion between real SPDX and CycloneDX samples
