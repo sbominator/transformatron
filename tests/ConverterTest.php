@@ -117,6 +117,110 @@ class ConverterTest extends TestCase
         $this->expectException(ValidationException::class);
         $converter->decodeJsonProxy($emptyString);
     }
+    
+    /**
+     * Test SPDX to CycloneDX conversion
+     */
+    public function testConvertSpdxToCyclonedx(): void
+    {
+        $converter = new Converter();
+        
+        // Minimal valid SPDX
+        $spdxJson = json_encode([
+            'spdxVersion' => 'SPDX-2.3',
+            'dataLicense' => 'CC0-1.0',
+            'SPDXID' => 'SPDXRef-DOCUMENT',
+            'name' => 'test-document',
+            'documentNamespace' => 'https://example.com/test'
+        ]);
+        
+        // Perform conversion
+        $result = $converter->convertSpdxToCyclonedx($spdxJson);
+        
+        // Assert results
+        $this->assertInstanceOf(ConversionResult::class, $result);
+        $this->assertEquals('CycloneDX', $result->getFormat());
+        
+        // Check content is valid JSON
+        $content = json_decode($result->getContent(), true);
+        $this->assertIsArray($content);
+        
+        // Verify placeholder content
+        $this->assertArrayHasKey('bomFormat', $content);
+        $this->assertEquals('CycloneDX', $content['bomFormat']);
+        $this->assertArrayHasKey('specVersion', $content);
+        $this->assertArrayHasKey('serialNumber', $content);
+        $this->assertArrayHasKey('metadata', $content);
+        $this->assertArrayHasKey('tools', $content['metadata']);
+        $this->assertArrayHasKey('original', $content);
+        $this->assertEquals('Converted from SPDX format', $content['original']);
+    }
+    
+    /**
+     * Test CycloneDX to SPDX conversion
+     */
+    public function testConvertCyclonedxToSpdx(): void
+    {
+        $converter = new Converter();
+        
+        // Minimal valid CycloneDX
+        $cyclonedxJson = json_encode([
+            'bomFormat' => 'CycloneDX',
+            'specVersion' => '1.4',
+            'version' => 1,
+            'serialNumber' => 'test-serial-number',
+            'metadata' => [
+                'timestamp' => '2023-01-01T00:00:00Z'
+            ]
+        ]);
+        
+        // Perform conversion
+        $result = $converter->convertCyclonedxToSpdx($cyclonedxJson);
+        
+        // Assert results
+        $this->assertInstanceOf(ConversionResult::class, $result);
+        $this->assertEquals('SPDX', $result->getFormat());
+        
+        // Check content is valid JSON
+        $content = json_decode($result->getContent(), true);
+        $this->assertIsArray($content);
+        
+        // Verify placeholder content
+        $this->assertArrayHasKey('spdxVersion', $content);
+        $this->assertEquals('SPDX-2.3', $content['spdxVersion']);
+        $this->assertArrayHasKey('dataLicense', $content);
+        $this->assertEquals('CC0-1.0', $content['dataLicense']);
+        $this->assertArrayHasKey('SPDXID', $content);
+        $this->assertArrayHasKey('creationInfo', $content);
+        $this->assertArrayHasKey('packages', $content);
+        $this->assertArrayHasKey('original', $content);
+        $this->assertEquals('Converted from CycloneDX format', $content['original']);
+    }
+    
+    /**
+     * Test that ConversionResult implements JsonSerializable
+     */
+    public function testConversionResultIsJsonSerializable(): void
+    {
+        // Create a ConversionResult with simple content
+        $content = json_encode(['test' => 'value']);
+        $result = new ConversionResult($content, 'TestFormat');
+        
+        // Test serialization
+        $serialized = json_encode($result);
+        $this->assertIsString($serialized);
+        
+        // Test deserialization
+        $deserialized = json_decode($serialized, true);
+        $this->assertIsArray($deserialized);
+        
+        // Verify structure
+        $this->assertArrayHasKey('format', $deserialized);
+        $this->assertEquals('TestFormat', $deserialized['format']);
+        $this->assertArrayHasKey('content', $deserialized);
+        $this->assertIsArray($deserialized['content']);
+        $this->assertEquals('value', $deserialized['content']['test']);
+    }
 }
 
 /**

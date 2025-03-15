@@ -5,7 +5,7 @@ namespace SBOMinator\Converter;
 /**
  * Class to hold the result of an SBOM conversion
  */
-class ConversionResult
+class ConversionResult implements \JsonSerializable
 {
     /**
      * @var string The converted SBOM content
@@ -47,5 +47,18 @@ class ConversionResult
     public function getFormat(): string
     {
         return $this->format;
+    }
+    
+    /**
+     * Specify data which should be serialized to JSON
+     * 
+     * @return array
+     */
+    public function jsonSerialize(): array
+    {
+        return [
+            'format' => $this->format,
+            'content' => json_decode($this->content, true)
+        ];
     }
 }
