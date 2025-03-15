@@ -7,6 +7,23 @@ namespace SBOMinator\Converter;
  */
 class Converter
 {
+    /**
+     * Format constants
+     */
+    public const FORMAT_SPDX = 'SPDX';
+    public const FORMAT_CYCLONEDX = 'CycloneDX';
+    
+    /**
+     * Version constants
+     */
+    public const SPDX_VERSION = 'SPDX-2.3';
+    public const CYCLONEDX_VERSION = '1.4';
+    
+    /**
+     * Relationship type constants
+     */
+    public const RELATIONSHIP_DEPENDS_ON = 'DEPENDS_ON';
+    
     // SPDX to CycloneDX field mappings
     private const SPDX_TO_CYCLONEDX_MAPPINGS = [
         'spdxVersion' => ['field' => 'specVersion', 'transform' => 'transformSpdxVersion'],
@@ -56,84 +73,110 @@ class Converter
         'hashes' => 'checksums' // Will need transformation
     ];
     
-    /**
-     * Constructor for the Converter class
-     */
-    public function __construct()
-    {
-        // Will be implemented later
-    }
+    // Required fields for valid SPDX
+    private const REQUIRED_SPDX_FIELDS = [
+        'spdxVersion',
+        'dataLicense',
+        'SPDXID',
+        'name',
+        'documentNamespace'
+    ];
+    
+    // Required fields for valid CycloneDX
+    private const REQUIRED_CYCLONEDX_FIELDS = [
+        'bomFormat',
+        'specVersion',
+        'version'
+    ];
 
     /**
      * Convert SPDX format to CycloneDX format
      *
      * @param string $json The SPDX JSON to convert
      * @return ConversionResult The conversion result with CycloneDX content
-     * @throws ValidationException If the JSON is invalid
+     * @throws ValidationException If the JSON is invalid or required fields are missing
+     * @throws ConversionException If the conversion fails
      */
     public function convertSpdxToCyclonedx(string $json): ConversionResult
     {
-        // Decode the JSON input
-        $spdxData = $this->decodeJson($json);
-        
-        // Initialize CycloneDX structure and warnings array
-        $cyclonedxData = [
-            'bomFormat' => 'CycloneDX',
-            'specVersion' => '1.4',
-            'version' => 1,
-            'components' => []
-        ];
-        $warnings = [];
-        
-        // Map fields from SPDX to CycloneDX
-        foreach (self::SPDX_TO_CYCLONEDX_MAPPINGS as $spdxField => $mapping) {
-            if (isset($spdxData[$spdxField])) {
-                $value = $spdxData[$spdxField];
-                
-                // Apply transformation if needed
-                if ($mapping['transform'] !== null && method_exists($this, $mapping['transform'])) {
-                    if ($spdxField === 'packages' || $spdxField === 'relationships') {
-                        // For packages and relationships, we need to pass the warnings array by reference
-                        $value = $this->{$mapping['transform']}($value, $warnings);
-                    } else {
-                        $value = $this->{$mapping['transform']}($value);
-                    }
-                }
-                
-                // Set the value in CycloneDX data
-                if ($mapping['field'] !== null) {
-                    $cyclonedxData[$mapping['field']] = $value;
-                }
-            } else {
-                $warnings[] = "Missing SPDX field: {$spdxField}";
-            }
-        }
-        
-        // Check for unknown fields in SPDX
-        foreach (array_keys($spdxData) as $field) {
-            if (!array_key_exists($field, self::SPDX_TO_CYCLONEDX_MAPPINGS)) {
-                $warnings[] = "Unknown or unmapped SPDX field: {$field}";
-            }
-        }
-        
-        // Always include metadata section
-        if (!isset($cyclonedxData['metadata'])) {
-            $cyclonedxData['metadata'] = [
-                'timestamp' => date('c'),
-                'tools' => [
-                    [
-                        'vendor' => 'SBOMinator',
-                        'name' => 'Converter',
-                        'version' => '1.0.0'
-                    ]
-                ]
+        try {
+            // Decode the JSON input
+            $spdxData = $this->decodeJson($json);
+            
+            // Validate required fields
+            $this->validateSpdxFields($spdxData);
+            
+            // Initialize CycloneDX structure and warnings array
+            $cyclonedxData = [
+                'bomFormat' => 'CycloneDX',
+                'specVersion' => self::CYCLONEDX_VERSION,
+                'version' => 1,
+                'components' => []
             ];
+            $warnings = [];
+            
+            // Map fields from SPDX to CycloneDX
+            foreach (self::SPDX_TO_CYCLONEDX_MAPPINGS as $spdxField => $mapping) {
+                if (isset($spdxData[$spdxField])) {
+                    $value = $spdxData[$spdxField];
+                    
+                    // Apply transformation if needed
+                    if ($mapping['transform'] !== null && method_exists($this, $mapping['transform'])) {
+                        if ($spdxField === 'packages' || $spdxField === 'relationships') {
+                            // For packages and relationships, we need to pass the warnings array by reference
+                            $value = $this->{$mapping['transform']}($value, $warnings);
+                        } else {
+                            $value = $this->{$mapping['transform']}($value);
+                        }
+                    }
+                    
+                    // Set the value in CycloneDX data
+                    if ($mapping['field'] !== null) {
+                        $cyclonedxData[$mapping['field']] = $value;
+                    }
+                } else if (in_array($spdxField, self::REQUIRED_SPDX_FIELDS)) {
+                    $warnings[] = "Missing required SPDX field: {$spdxField}";
+                }
+            }
+            
+            // Check for unknown fields in SPDX
+            foreach (array_keys($spdxData) as $field) {
+                if (!array_key_exists($field, self::SPDX_TO_CYCLONEDX_MAPPINGS)) {
+                    $warnings[] = "Unknown or unmapped SPDX field: {$field}";
+                }
+            }
+            
+            // Always include metadata section
+            if (!isset($cyclonedxData['metadata'])) {
+                $cyclonedxData['metadata'] = [
+                    'timestamp' => date('c'),
+                    'tools' => [
+                        [
+                            'vendor' => 'SBOMinator',
+                            'name' => 'Converter',
+                            'version' => '1.0.0'
+                        ]
+                    ]
+                ];
+            }
+            
+            // Convert to JSON
+            $cyclonedxContent = json_encode($cyclonedxData, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+            
+            return new ConversionResult($cyclonedxContent, self::FORMAT_CYCLONEDX, $warnings);
+        } catch (ValidationException $e) {
+            // Rethrow validation exceptions
+            throw $e;
+        } catch (\Exception $e) {
+            // Wrap other exceptions
+            throw new ConversionException(
+                'Failed to convert SPDX to CycloneDX: ' . $e->getMessage(),
+                self::FORMAT_SPDX,
+                self::FORMAT_CYCLONEDX,
+                0,
+                $e
+            );
         }
-        
-        // Convert to JSON
-        $cyclonedxContent = json_encode($cyclonedxData);
-        
-        return new ConversionResult($cyclonedxContent, 'CycloneDX', $warnings);
     }
     
     /**
@@ -141,69 +184,87 @@ class Converter
      *
      * @param string $json The CycloneDX JSON to convert
      * @return ConversionResult The conversion result with SPDX content
-     * @throws ValidationException If the JSON is invalid
+     * @throws ValidationException If the JSON is invalid or required fields are missing
+     * @throws ConversionException If the conversion fails
      */
     public function convertCyclonedxToSpdx(string $json): ConversionResult
     {
-        // Decode the JSON input
-        $cyclonedxData = $this->decodeJson($json);
-        
-        // Initialize SPDX structure and warnings array
-        $spdxData = [
-            'spdxVersion' => 'SPDX-2.3',
-            'dataLicense' => 'CC0-1.0',
-            'SPDXID' => 'SPDXRef-DOCUMENT',
-            'documentNamespace' => 'https://sbominator.example/spdx/placeholder-' . uniqid(),
-            'packages' => [],
-            'relationships' => []
-        ];
-        $warnings = [];
-        
-        // Map fields from CycloneDX to SPDX
-        foreach (self::CYCLONEDX_TO_SPDX_MAPPINGS as $cyclonedxField => $mapping) {
-            if (isset($cyclonedxData[$cyclonedxField])) {
-                $value = $cyclonedxData[$cyclonedxField];
-                
-                // Apply transformation if needed
-                if ($mapping['transform'] !== null && method_exists($this, $mapping['transform'])) {
-                    if ($cyclonedxField === 'components' || $cyclonedxField === 'dependencies') {
-                        // For components and dependencies, we need to pass the warnings array by reference
-                        $value = $this->{$mapping['transform']}($value, $warnings);
-                    } else {
-                        $value = $this->{$mapping['transform']}($value);
-                    }
-                }
-                
-                // Set the value in SPDX data
-                if ($mapping['field'] !== null) {
-                    $spdxData[$mapping['field']] = $value;
-                }
-            } else {
-                $warnings[] = "Missing CycloneDX field: {$cyclonedxField}";
-            }
-        }
-        
-        // Check for unknown fields in CycloneDX
-        foreach (array_keys($cyclonedxData) as $field) {
-            if (!array_key_exists($field, self::CYCLONEDX_TO_SPDX_MAPPINGS)) {
-                $warnings[] = "Unknown or unmapped CycloneDX field: {$field}";
-            }
-        }
-        
-        // Always include creationInfo section
-        if (!isset($spdxData['creationInfo'])) {
-            $spdxData['creationInfo'] = [
-                'created' => date('c'),
-                'creators' => [
-                    'Tool: SBOMinator-Converter-1.0'
-                ]
+        try {
+            // Decode the JSON input
+            $cyclonedxData = $this->decodeJson($json);
+            
+            // Validate required fields
+            $this->validateCycloneDxFields($cyclonedxData);
+            
+            // Initialize SPDX structure and warnings array
+            $spdxData = [
+                'spdxVersion' => self::SPDX_VERSION,
+                'dataLicense' => 'CC0-1.0',
+                'SPDXID' => 'SPDXRef-DOCUMENT',
+                'documentNamespace' => 'https://sbominator.example/spdx/placeholder-' . uniqid(),
+                'packages' => [],
+                'relationships' => []
             ];
+            $warnings = [];
+            
+            // Map fields from CycloneDX to SPDX
+            foreach (self::CYCLONEDX_TO_SPDX_MAPPINGS as $cyclonedxField => $mapping) {
+                if (isset($cyclonedxData[$cyclonedxField])) {
+                    $value = $cyclonedxData[$cyclonedxField];
+                    
+                    // Apply transformation if needed
+                    if ($mapping['transform'] !== null && method_exists($this, $mapping['transform'])) {
+                        if ($cyclonedxField === 'components' || $cyclonedxField === 'dependencies') {
+                            // For components and dependencies, we need to pass the warnings array by reference
+                            $value = $this->{$mapping['transform']}($value, $warnings);
+                        } else {
+                            $value = $this->{$mapping['transform']}($value);
+                        }
+                    }
+                    
+                    // Set the value in SPDX data
+                    if ($mapping['field'] !== null) {
+                        $spdxData[$mapping['field']] = $value;
+                    }
+                } else if (in_array($cyclonedxField, self::REQUIRED_CYCLONEDX_FIELDS)) {
+                    $warnings[] = "Missing required CycloneDX field: {$cyclonedxField}";
+                }
+            }
+            
+            // Check for unknown fields in CycloneDX
+            foreach (array_keys($cyclonedxData) as $field) {
+                if (!array_key_exists($field, self::CYCLONEDX_TO_SPDX_MAPPINGS)) {
+                    $warnings[] = "Unknown or unmapped CycloneDX field: {$field}";
+                }
+            }
+            
+            // Always include creationInfo section
+            if (!isset($spdxData['creationInfo'])) {
+                $spdxData['creationInfo'] = [
+                    'created' => date('c'),
+                    'creators' => [
+                        'Tool: SBOMinator-Converter-1.0'
+                    ]
+                ];
+            }
+            
+            // Convert to JSON
+            $spdxContent = json_encode($spdxData, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+            
+            return new ConversionResult($spdxContent, self::FORMAT_SPDX, $warnings);
+        } catch (ValidationException $e) {
+            // Rethrow validation exceptions
+            throw $e;
+        } catch (\Exception $e) {
+            // Wrap other exceptions
+            throw new ConversionException(
+                'Failed to convert CycloneDX to SPDX: ' . $e->getMessage(),
+                self::FORMAT_CYCLONEDX,
+                self::FORMAT_SPDX,
+                0,
+                $e
+            );
         }
-        
-        // Convert to JSON
-        $spdxContent = json_encode($spdxData);
-        
-        return new ConversionResult($spdxContent, 'SPDX', $warnings);
     }
 
     /**
@@ -232,6 +293,62 @@ class Converter
         }
         
         return $data;
+    }
+    
+    /**
+     * Validate that required SPDX fields are present
+     * 
+     * @param array $data The SPDX data to validate
+     * @throws ValidationException If required fields are missing
+     */
+    protected function validateSpdxFields(array $data): void
+    {
+        $missingFields = [];
+        
+        foreach (self::REQUIRED_SPDX_FIELDS as $field) {
+            if (!isset($data[$field])) {
+                $missingFields[] = $field;
+            }
+        }
+        
+        if (!empty($missingFields)) {
+            throw new ValidationException(
+                'Missing required SPDX fields: ' . implode(', ', $missingFields),
+                ['missing_fields' => $missingFields]
+            );
+        }
+    }
+    
+    /**
+     * Validate that required CycloneDX fields are present
+     * 
+     * @param array $data The CycloneDX data to validate
+     * @throws ValidationException If required fields are missing
+     */
+    protected function validateCycloneDxFields(array $data): void
+    {
+        $missingFields = [];
+        
+        foreach (self::REQUIRED_CYCLONEDX_FIELDS as $field) {
+            if (!isset($data[$field])) {
+                $missingFields[] = $field;
+            }
+        }
+        
+        if (!empty($missingFields)) {
+            throw new ValidationException(
+                'Missing required CycloneDX fields: ' . implode(', ', $missingFields),
+                ['missing_fields' => $missingFields]
+            );
+        }
+        
+        // Extra validation for specific fields
+        if (isset($data['bomFormat']) && $data['bomFormat'] !== 'CycloneDX') {
+            throw new ValidationException(
+                'Invalid CycloneDX bomFormat: ' . $data['bomFormat'],
+                ['invalid_field' => 'bomFormat']
+            );
+        }
     }
     
     /**
@@ -459,6 +576,88 @@ class Converter
     }
     
     /**
+     * Transform SPDX relationships to CycloneDX dependencies
+     * 
+     * @param array $relationships SPDX relationships array
+     * @param array &$warnings Array to collect warnings during conversion
+     * @return array CycloneDX dependencies array
+     */
+    protected function transformRelationshipsToDependencies(array $relationships, array &$warnings): array
+    {
+        $dependencies = [];
+        $dependencyMap = [];
+        
+        // First pass: collect all dependency relationships
+        foreach ($relationships as $relationship) {
+            // Check if required fields exist
+            if (!isset($relationship['spdxElementId']) || !isset($relationship['relatedSpdxElement']) || !isset($relationship['relationshipType'])) {
+                $warnings[] = "Malformed relationship entry in SPDX: missing required fields";
+                continue;
+            }
+            
+            // Map only dependency relationships
+            // In SPDX, A DEPENDS_ON B means A depends on B
+            // In CycloneDX, we need to list B as a dependency of A
+            if ($relationship['relationshipType'] === self::RELATIONSHIP_DEPENDS_ON) {
+                $dependent = $this->transformSpdxId($relationship['spdxElementId']);
+                $dependency = $this->transformSpdxId($relationship['relatedSpdxElement']);
+                
+                if (!isset($dependencyMap[$dependent])) {
+                    $dependencyMap[$dependent] = [];
+                }
+                
+                $dependencyMap[$dependent][] = $dependency;
+            } elseif (str_contains(strtoupper($relationship['relationshipType']), 'DEPEND')) {
+                // Handle other dependency-related relationship types, with warning
+                $warnings[] = "Unsupported dependency relationship type: {$relationship['relationshipType']}";
+            }
+        }
+        
+        // Second pass: format into CycloneDX dependencies structure
+        foreach ($dependencyMap as $ref => $deps) {
+            $dependencies[] = [
+                'ref' => $ref,
+                'dependsOn' => $deps
+            ];
+        }
+        
+        return $dependencies;
+    }
+    
+    /**
+     * Transform CycloneDX dependencies to SPDX relationships
+     * 
+     * @param array $dependencies CycloneDX dependencies array
+     * @param array &$warnings Array to collect warnings during conversion
+     * @return array SPDX relationships array
+     */
+    protected function transformDependenciesToRelationships(array $dependencies, array &$warnings): array
+    {
+        $relationships = [];
+        
+        foreach ($dependencies as $dependency) {
+            // Check if required fields exist
+            if (!isset($dependency['ref']) || !isset($dependency['dependsOn']) || !is_array($dependency['dependsOn'])) {
+                $warnings[] = "Malformed dependency entry in CycloneDX: missing required fields";
+                continue;
+            }
+            
+            $dependent = $this->transformSerialNumber($dependency['ref']);
+            
+            // Process each dependency
+            foreach ($dependency['dependsOn'] as $dependencyRef) {
+                $relationships[] = [
+                    'spdxElementId' => $dependent,
+                    'relatedSpdxElement' => $this->transformSerialNumber($dependencyRef),
+                    'relationshipType' => self::RELATIONSHIP_DEPENDS_ON
+                ];
+            }
+        }
+        
+        return $relationships;
+    }
+    
+    /**
      * Transform SPDX version to CycloneDX spec version
      * 
      * @param string $spdxVersion The SPDX version
@@ -471,7 +670,7 @@ class Converter
             'SPDX-2.3' => '1.4',
             'SPDX-2.2' => '1.3',
             'SPDX-2.1' => '1.2',
-            default => '1.4', // Default to latest
+            default => self::CYCLONEDX_VERSION, // Default to latest
         };
     }
     
@@ -543,7 +742,7 @@ class Converter
             '1.4' => 'SPDX-2.3',
             '1.3' => 'SPDX-2.2',
             '1.2' => 'SPDX-2.1',
-            default => 'SPDX-2.3', // Default to latest
+            default => self::SPDX_VERSION, // Default to latest
         };
     }
     
@@ -593,87 +792,5 @@ class Converter
         }
         
         return $creationInfo;
-    }
-    
-    /**
-     * Transform SPDX relationships to CycloneDX dependencies
-     * 
-     * @param array $relationships SPDX relationships array
-     * @param array &$warnings Array to collect warnings during conversion
-     * @return array CycloneDX dependencies array
-     */
-    protected function transformRelationshipsToDependencies(array $relationships, array &$warnings): array
-    {
-        $dependencies = [];
-        $dependencyMap = [];
-        
-        // First pass: collect all dependency relationships
-        foreach ($relationships as $relationship) {
-            // Check if required fields exist
-            if (!isset($relationship['spdxElementId']) || !isset($relationship['relatedSpdxElement']) || !isset($relationship['relationshipType'])) {
-                $warnings[] = "Malformed relationship entry in SPDX: missing required fields";
-                continue;
-            }
-            
-            // Map only dependency relationships
-            // In SPDX, A DEPENDS_ON B means A depends on B
-            // In CycloneDX, we need to list B as a dependency of A
-            if ($relationship['relationshipType'] === 'DEPENDS_ON') {
-                $dependent = $this->transformSpdxId($relationship['spdxElementId']);
-                $dependency = $this->transformSpdxId($relationship['relatedSpdxElement']);
-                
-                if (!isset($dependencyMap[$dependent])) {
-                    $dependencyMap[$dependent] = [];
-                }
-                
-                $dependencyMap[$dependent][] = $dependency;
-            } elseif (str_contains(strtoupper($relationship['relationshipType']), 'DEPEND')) {
-                // Handle other dependency-related relationship types, with warning
-                $warnings[] = "Unsupported dependency relationship type: {$relationship['relationshipType']}";
-            }
-        }
-        
-        // Second pass: format into CycloneDX dependencies structure
-        foreach ($dependencyMap as $ref => $deps) {
-            $dependencies[] = [
-                'ref' => $ref,
-                'dependsOn' => $deps
-            ];
-        }
-        
-        return $dependencies;
-    }
-    
-    /**
-     * Transform CycloneDX dependencies to SPDX relationships
-     * 
-     * @param array $dependencies CycloneDX dependencies array
-     * @param array &$warnings Array to collect warnings during conversion
-     * @return array SPDX relationships array
-     */
-    protected function transformDependenciesToRelationships(array $dependencies, array &$warnings): array
-    {
-        $relationships = [];
-        
-        foreach ($dependencies as $dependency) {
-            // Check if required fields exist
-            if (!isset($dependency['ref']) || !isset($dependency['dependsOn']) || !is_array($dependency['dependsOn'])) {
-                $warnings[] = "Malformed dependency entry in CycloneDX: missing required fields";
-                continue;
-            }
-            
-            $dependent = $this->transformSerialNumber($dependency['ref']);
-            
-            // Process each dependency
-            foreach ($dependency['dependsOn'] as $dependencyRef) {
-                $relationships[] = [
-                    'spdxElementId' => $dependent,
-                    'relatedSpdxElement' => $this->transformSerialNumber($dependencyRef),
-                    'relationshipType' => 'DEPENDS_ON'
-                ];
-            }
-        }
-        
-        return $relationships;
     }
 }

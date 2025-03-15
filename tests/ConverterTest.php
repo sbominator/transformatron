@@ -119,6 +119,76 @@ class ConverterTest extends TestCase
     }
     
     /**
+     * Test validation of required SPDX fields
+     */
+    public function testValidateSpdxFields(): void
+    {
+        $converter = new ConverterTestProxy();
+        
+        // Valid SPDX data
+        $validData = [
+            'spdxVersion' => 'SPDX-2.3',
+            'dataLicense' => 'CC0-1.0',
+            'SPDXID' => 'SPDXRef-DOCUMENT',
+            'name' => 'test-document',
+            'documentNamespace' => 'https://example.com/test'
+        ];
+        
+        // This should not throw an exception
+        $converter->validateSpdxFieldsProxy($validData);
+        
+        // Invalid data (missing fields)
+        $invalidData = [
+            'spdxVersion' => 'SPDX-2.3',
+            'dataLicense' => 'CC0-1.0',
+            // Missing SPDXID, name, and documentNamespace
+        ];
+        
+        $this->expectException(ValidationException::class);
+        $this->expectExceptionMessage('Missing required SPDX fields');
+        $converter->validateSpdxFieldsProxy($invalidData);
+    }
+    
+    /**
+     * Test validation of required CycloneDX fields
+     */
+    public function testValidateCycloneDxFields(): void
+    {
+        $converter = new ConverterTestProxy();
+        
+        // Valid CycloneDX data
+        $validData = [
+            'bomFormat' => 'CycloneDX',
+            'specVersion' => '1.4',
+            'version' => 1
+        ];
+        
+        // This should not throw an exception
+        $converter->validateCycloneDxFieldsProxy($validData);
+        
+        // Invalid data (missing fields)
+        $invalidData = [
+            'bomFormat' => 'CycloneDX',
+            // Missing specVersion and version
+        ];
+        
+        $this->expectException(ValidationException::class);
+        $this->expectExceptionMessage('Missing required CycloneDX fields');
+        $converter->validateCycloneDxFieldsProxy($invalidData);
+        
+        // Invalid bomFormat
+        $invalidFormat = [
+            'bomFormat' => 'InvalidFormat',
+            'specVersion' => '1.4',
+            'version' => 1
+        ];
+        
+        $this->expectException(ValidationException::class);
+        $this->expectExceptionMessage('Invalid CycloneDX bomFormat');
+        $converter->validateCycloneDxFieldsProxy($invalidFormat);
+    }
+    
+    /**
      * Test SPDX to CycloneDX conversion with field mapping
      */
     public function testConvertSpdxToCyclonedxFieldMapping(): void
@@ -149,8 +219,8 @@ class ConverterTest extends TestCase
         $this->assertInstanceOf(ConversionResult::class, $result);
         $this->assertEquals('CycloneDX', $result->getFormat());
         
-        // Parse the content
-        $content = json_decode($result->getContent(), true);
+        // Get content as array
+        $content = $result->getContentAsArray();
         
         // Test mapped fields
         $this->assertEquals('1.4', $content['specVersion']); // Transformed from SPDX-2.3
@@ -193,7 +263,7 @@ class ConverterTest extends TestCase
                 ]
             ],
             'unmappedField' => 'This field has no mapping',
-            'components' => [] // Known field but not mapped in our implementation
+            'components' => [] // Known field but empty
         ]);
         
         // Perform conversion
@@ -203,8 +273,8 @@ class ConverterTest extends TestCase
         $this->assertInstanceOf(ConversionResult::class, $result);
         $this->assertEquals('SPDX', $result->getFormat());
         
-        // Parse the content
-        $content = json_decode($result->getContent(), true);
+        // Get content as array
+        $content = $result->getContentAsArray();
         
         // Test mapped fields
         $this->assertEquals('SPDX-2.3', $content['spdxVersion']); // Transformed from 1.4
@@ -277,8 +347,8 @@ class ConverterTest extends TestCase
         $this->assertInstanceOf(ConversionResult::class, $result);
         $this->assertEquals('CycloneDX', $result->getFormat());
         
-        // Parse the content
-        $content = json_decode($result->getContent(), true);
+        // Get content as array
+        $content = $result->getContentAsArray();
         
         // Test components array
         $this->assertArrayHasKey('components', $content);
@@ -383,8 +453,8 @@ class ConverterTest extends TestCase
         $this->assertInstanceOf(ConversionResult::class, $result);
         $this->assertEquals('SPDX', $result->getFormat());
         
-        // Parse the content
-        $content = json_decode($result->getContent(), true);
+        // Get content as array
+        $content = $result->getContentAsArray();
         
         // Test packages array
         $this->assertArrayHasKey('packages', $content);
@@ -420,8 +490,7 @@ class ConverterTest extends TestCase
         $warnings = $result->getWarnings();
         $this->assertNotEmpty($warnings);
         $this->assertTrue(in_array('Unknown or unmapped component field: customComponentField', $warnings));
-        // We might also expect warnings for unsupported hash algorithm, but it's not directly tested here
-        // as it depends on how exactly unsupportedHashAlg is processed
+        $this->assertTrue(in_array('Unknown or unmapped component field: unsupportedHashAlg', $warnings));
     }
     
     /**
@@ -437,6 +506,7 @@ class ConverterTest extends TestCase
             'dataLicense' => 'CC0-1.0',
             'SPDXID' => 'SPDXRef-DOCUMENT',
             'name' => 'dependency-test-document',
+            'documentNamespace' => 'https://example.com/test',
             'packages' => [
                 [
                     'name' => 'main-package',
@@ -484,8 +554,8 @@ class ConverterTest extends TestCase
         // Perform conversion
         $result = $converter->convertSpdxToCyclonedx($spdxJson);
         
-        // Parse the content
-        $content = json_decode($result->getContent(), true);
+        // Get content as array
+        $content = $result->getContentAsArray();
         
         // Test dependencies array
         $this->assertArrayHasKey('dependencies', $content);
@@ -570,8 +640,8 @@ class ConverterTest extends TestCase
         // Perform conversion
         $result = $converter->convertCyclonedxToSpdx($cyclonedxJson);
         
-        // Parse the content
-        $content = json_decode($result->getContent(), true);
+        // Get content as array
+        $content = $result->getContentAsArray();
         
         // Test relationships array
         $this->assertArrayHasKey('relationships', $content);
@@ -629,6 +699,8 @@ class ConverterTest extends TestCase
             'spdxVersion' => 'SPDX-2.3',
             'dataLicense' => 'CC0-1.0',
             'SPDXID' => 'SPDXRef-DOCUMENT',
+            'name' => 'test-document',
+            'documentNamespace' => 'https://example.com/test',
             'packages' => [
                 [
                     'name' => 'standalone-package',
@@ -642,8 +714,8 @@ class ConverterTest extends TestCase
         // Perform conversion
         $result = $converter->convertSpdxToCyclonedx($spdxJson);
         
-        // Parse the content
-        $content = json_decode($result->getContent(), true);
+        // Get content as array
+        $content = $result->getContentAsArray();
         
         // No dependencies should be created
         $this->assertArrayNotHasKey('dependencies', $content);
@@ -652,6 +724,7 @@ class ConverterTest extends TestCase
         $cyclonedxJson = json_encode([
             'bomFormat' => 'CycloneDX',
             'specVersion' => '1.4',
+            'version' => 1,
             'components' => [
                 [
                     'type' => 'library',
@@ -666,8 +739,8 @@ class ConverterTest extends TestCase
         // Perform conversion
         $result = $converter->convertCyclonedxToSpdx($cyclonedxJson);
         
-        // Parse the content
-        $content = json_decode($result->getContent(), true);
+        // Get content as array
+        $content = $result->getContentAsArray();
         
         // Empty relationships array should be created
         $this->assertArrayHasKey('relationships', $content);
@@ -686,6 +759,8 @@ class ConverterTest extends TestCase
             'spdxVersion' => 'SPDX-2.3',
             'dataLicense' => 'CC0-1.0',
             'SPDXID' => 'SPDXRef-DOCUMENT',
+            'name' => 'test-document',
+            'documentNamespace' => 'https://example.com/test',
             'packages' => [
                 [
                     'SPDXID' => 'SPDXRef-Package-1',
@@ -699,8 +774,8 @@ class ConverterTest extends TestCase
         // Perform conversion
         $result = $converter->convertSpdxToCyclonedx($spdxJson);
         
-        // Parse the content
-        $content = json_decode($result->getContent(), true);
+        // Get content as array
+        $content = $result->getContentAsArray();
         
         // Check that component was created despite missing name
         $this->assertArrayHasKey('components', $content);
@@ -718,6 +793,7 @@ class ConverterTest extends TestCase
         $cyclonedxJson = json_encode([
             'bomFormat' => 'CycloneDX',
             'specVersion' => '1.4',
+            'version' => 1,
             'components' => [
                 [
                     'type' => 'library',
@@ -731,8 +807,8 @@ class ConverterTest extends TestCase
         // Perform conversion
         $result = $converter->convertCyclonedxToSpdx($cyclonedxJson);
         
-        // Parse the content
-        $content = json_decode($result->getContent(), true);
+        // Get content as array
+        $content = $result->getContentAsArray();
         
         // Check that package was created despite missing name
         $this->assertArrayHasKey('packages', $content);
@@ -748,58 +824,94 @@ class ConverterTest extends TestCase
     }
     
     /**
-     * Test ConversionResult warnings functionality
+     * Test conversion with malformed input
      */
-    public function testConversionResultWarnings(): void
+    public function testConversionWithMalformedInput(): void
     {
-        // Test empty warnings
-        $result = new ConversionResult('content', 'format');
-        $this->assertEmpty($result->getWarnings());
-        $this->assertFalse($result->hasWarnings());
+        $converter = new Converter();
         
-        // Test with initial warnings
-        $warnings = ['Warning 1', 'Warning 2'];
-        $result = new ConversionResult('content', 'format', $warnings);
-        $this->assertEquals($warnings, $result->getWarnings());
-        $this->assertTrue($result->hasWarnings());
+        // Malformed JSON
+        $malformedJson = '{name: "test",}'; // Invalid JSON syntax
         
-        // Test adding warnings
-        $result = new ConversionResult('content', 'format');
-        $result->addWarning('New warning');
-        $this->assertEquals(['New warning'], $result->getWarnings());
-        $this->assertTrue($result->hasWarnings());
+        $this->expectException(ValidationException::class);
+        $converter->convertSpdxToCyclonedx($malformedJson);
         
-        // Test JSON serialization includes warnings
-        $result = new ConversionResult(json_encode(['test' => 'value']), 'format', ['Warning']);
-        $serialized = json_encode($result);
-        $deserialized = json_decode($serialized, true);
-        $this->assertArrayHasKey('warnings', $deserialized);
-        $this->assertEquals(['Warning'], $deserialized['warnings']);
+        // Same for CycloneDX to SPDX (no need to actually test, since it uses the same JSON parsing)
     }
     
     /**
-     * Test that ConversionResult implements JsonSerializable
+     * Test ConversionResult functionality
      */
-    public function testConversionResultIsJsonSerializable(): void
+    public function testConversionResultFunctionality(): void
     {
-        // Create a ConversionResult with simple content
+        // Test content
         $content = json_encode(['test' => 'value']);
         $result = new ConversionResult($content, 'TestFormat');
         
-        // Test serialization
+        // Basic getters
+        $this->assertEquals($content, $result->getContent());
+        $this->assertEquals('TestFormat', $result->getFormat());
+        $this->assertEmpty($result->getWarnings());
+        $this->assertFalse($result->hasWarnings());
+        
+        // Test getContentAsArray
+        $this->assertEquals(['test' => 'value'], $result->getContentAsArray());
+        
+        // Test warnings
+        $result->addWarning('Test warning');
+        $this->assertEquals(['Test warning'], $result->getWarnings());
+        $this->assertTrue($result->hasWarnings());
+        
+        // Test toJson
+        $this->assertEquals($content, $result->toJson());
+        
+        // Test jsonSerialize
         $serialized = json_encode($result);
-        $this->assertIsString($serialized);
-        
-        // Test deserialization
         $deserialized = json_decode($serialized, true);
-        $this->assertIsArray($deserialized);
+        $this->assertEquals(['test' => 'value'], $deserialized);
         
-        // Verify structure
-        $this->assertArrayHasKey('format', $deserialized);
-        $this->assertEquals('TestFormat', $deserialized['format']);
-        $this->assertArrayHasKey('content', $deserialized);
-        $this->assertIsArray($deserialized['content']);
-        $this->assertEquals('value', $deserialized['content']['test']);
+        // Test getSummary
+        $summary = $result->getSummary();
+        $this->assertEquals('TestFormat', $summary['format']);
+        $this->assertEquals(['test' => 'value'], $summary['content']);
+        $this->assertEquals(['Test warning'], $summary['warnings']);
+    }
+    
+    /**
+     * Test proper exception handling and propagation
+     */
+    public function testExceptionHandling(): void
+    {
+        $converter = new Converter();
+        
+        // Test with invalid SPDX (missing required fields)
+        $invalidSpdx = json_encode([
+            'name' => 'test-document'
+            // Missing required fields
+        ]);
+        
+        try {
+            $converter->convertSpdxToCyclonedx($invalidSpdx);
+            $this->fail('Expected ValidationException was not thrown');
+        } catch (ValidationException $e) {
+            $this->assertStringContainsString('Missing required SPDX fields', $e->getMessage());
+            $this->assertNotEmpty($e->getValidationErrors());
+        }
+        
+        // Test with invalid CycloneDX
+        $invalidCyclonedx = json_encode([
+            'bomFormat' => 'InvalidFormat', // Invalid format
+            'specVersion' => '1.4',
+            'version' => 1
+        ]);
+        
+        try {
+            $converter->convertCyclonedxToSpdx($invalidCyclonedx);
+            $this->fail('Expected ValidationException was not thrown');
+        } catch (ValidationException $e) {
+            $this->assertStringContainsString('Invalid CycloneDX bomFormat', $e->getMessage());
+            $this->assertNotEmpty($e->getValidationErrors());
+        }
     }
 }
 
@@ -814,5 +926,21 @@ class ConverterTestProxy extends Converter
     public function decodeJsonProxy(string $json): array
     {
         return $this->decodeJson($json);
+    }
+    
+    /**
+     * Proxy method to test protected validateSpdxFields method
+     */
+    public function validateSpdxFieldsProxy(array $data): void
+    {
+        $this->validateSpdxFields($data);
+    }
+    
+    /**
+     * Proxy method to test protected validateCycloneDxFields method
+     */
+    public function validateCycloneDxFieldsProxy(array $data): void
+    {
+        $this->validateCycloneDxFields($data);
     }
 }

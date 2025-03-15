@@ -47,6 +47,16 @@ class ConversionResult implements \JsonSerializable
     }
     
     /**
+     * Get the decoded SBOM content as an array
+     * 
+     * @return array
+     */
+    public function getContentAsArray(): array
+    {
+        return json_decode($this->content, true) ?? [];
+    }
+    
+    /**
      * Get the format of the converted SBOM
      * 
      * @return string
@@ -75,6 +85,7 @@ class ConversionResult implements \JsonSerializable
     public function addWarning(string $warning): self
     {
         $this->warnings[] = $warning;
+        
         return $this;
     }
     
@@ -91,9 +102,30 @@ class ConversionResult implements \JsonSerializable
     /**
      * Specify data which should be serialized to JSON
      * 
+     * @return mixed
+     */
+    public function jsonSerialize(): mixed
+    {
+        return json_decode($this->content, true);
+    }
+    
+    /**
+     * Get the result as a string representation of the JSON
+     * 
+     * @param int $options JSON encoding options
+     * @return string
+     */
+    public function toJson(int $options = 0): string
+    {
+        return $this->content;
+    }
+    
+    /**
+     * Get a result summary including content and warnings
+     * 
      * @return array
      */
-    public function jsonSerialize(): array
+    public function getSummary(): array
     {
         return [
             'format' => $this->format,
