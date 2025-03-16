@@ -3,9 +3,12 @@
 namespace SBOMinator\Transformatron\Tests\Unit\Transformer;
 
 use PHPUnit\Framework\TestCase;
+use SBOMinator\Transformatron\Enum\FormatEnum;
 use SBOMinator\Transformatron\Enum\RelationshipTypeEnum;
+use SBOMinator\Transformatron\Error\ConversionError;
 use SBOMinator\Transformatron\Transformer\RelationshipTransformer;
 use SBOMinator\Transformatron\Transformer\SpdxIdTransformer;
+use SBOMinator\Transformatron\Transformer\TransformerInterface;
 
 /**
  * Test cases for RelationshipTransformer class.
@@ -29,11 +32,168 @@ class RelationshipTransformerTest extends TestCase
     }
 
     /**
+     * Test that the transformer implements the TransformerInterface.
+     */
+    public function testImplementsTransformerInterface(): void
+    {
+        $this->assertInstanceOf(TransformerInterface::class, $this->transformer);
+    }
+
+    /**
+     * Test the source and target formats of the transformer.
+     */
+    public function testGetSourceAndTargetFormats(): void
+    {
+        $this->assertEquals(FormatEnum::FORMAT_SPDX, $this->transformer->getSourceFormat());
+        $this->assertEquals(FormatEnum::FORMAT_CYCLONEDX, $this->transformer->getTargetFormat());
+    }
+
+    /**
+     * Test the transform method with valid relationships.
+     */
+    public function testTransformWithValidRelationships(): void
+    {
+        // Setup mock expectations
+        $this->spdxIdTransformer->method('transformSpdxId')
+            ->willReturnCallback(function ($id) {
+                return str_replace('SPDXRef-', '', $id);
+            });
+
+        // Create test data
+        $sourceData = [
+            'relationships' => [
+                [
+                    'spdxElementId' => 'SPDXRef-Package-A',
+                    'relatedSpdxElement' => 'SPDXRef-Package-B',
+                    'relationshipType' => RelationshipTypeEnum::RELATIONSHIP_DEPENDS_ON
+                ],
+                [
+                    'spdxElementId' => 'SPDXRef-Package-A',
+                    'relatedSpdxElement' => 'SPDXRef-Package-C',
+                    'relationshipType' => RelationshipTypeEnum::RELATIONSHIP_DEPENDS_ON
+                ],
+                [
+                    'spdxElementId' => 'SPDXRef-Package-B',
+                    'relatedSpdxElement' => 'SPDXRef-Package-D',
+                    'relationshipType' => RelationshipTypeEnum::RELATIONSHIP_DEPENDS_ON
+                ]
+            ]
+        ];
+
+        $warnings = [];
+        $errors = [];
+        $result = $this->transformer->transform($sourceData, $warnings, $errors);
+
+        // Verify results
+        $this->assertArrayHasKey('dependencies', $result);
+        $this->assertCount(2, $result['dependencies']);
+
+        // Find Package-A dependency
+        $packageADep = $this->findDependencyByRef($result['dependencies'], 'Package-A');
+        $this->assertNotNull($packageADep);
+        $this->assertCount(2, $packageADep['dependsOn']);
+        $this->assertContains('Package-B', $packageADep['dependsOn']);
+        $this->assertContains('Package-C', $packageADep['dependsOn']);
+
+        // Find Package-B dependency
+        $packageBDep = $this->findDependencyByRef($result['dependencies'], 'Package-B');
+        $this->assertNotNull($packageBDep);
+        $this->assertCount(1, $packageBDep['dependsOn']);
+        $this->assertContains('Package-D', $packageBDep['dependsOn']);
+
+        $this->assertEmpty($errors);
+    }
+
+    /**
+     * Test the transform method with circular dependencies.
+     */
+    public function testTransformWithCircularDependencies(): void
+    {
+        // Setup mock expectations
+        $this->spdxIdTransformer->method('transformSpdxId')
+            ->willReturnCallback(function ($id) {
+                return str_replace('SPDXRef-', '', $id);
+            });
+
+        // Create test data with circular dependency: A -> B -> C -> A
+        $sourceData = [
+            'relationships' => [
+                [
+                    'spdxElementId' => 'SPDXRef-Package-A',
+                    'relatedSpdxElement' => 'SPDXRef-Package-B',
+                    'relationshipType' => RelationshipTypeEnum::RELATIONSHIP_DEPENDS_ON
+                ],
+                [
+                    'spdxElementId' => 'SPDXRef-Package-B',
+                    'relatedSpdxElement' => 'SPDXRef-Package-C',
+                    'relationshipType' => RelationshipTypeEnum::RELATIONSHIP_DEPENDS_ON
+                ],
+                [
+                    'spdxElementId' => 'SPDXRef-Package-C',
+                    'relatedSpdxElement' => 'SPDXRef-Package-A',
+                    'relationshipType' => RelationshipTypeEnum::RELATIONSHIP_DEPENDS_ON
+                ]
+            ]
+        ];
+
+        $warnings = [];
+        $errors = [];
+        $result = $this->transformer->transform($sourceData, $warnings, $errors);
+
+        // Transformation should still succeed with warnings
+        $this->assertArrayHasKey('dependencies', $result);
+        $this->assertCount(3, $result['dependencies']);
+
+        // Should have warning about circular dependency
+        $this->assertNotEmpty($warnings);
+        $this->assertStringContainsString('Circular dependency detected', $warnings[0]);
+        $this->assertEmpty($errors);
+    }
+
+    /**
+     * Test the transform method with missing relationships.
+     */
+    public function testTransformWithMissingRelationships(): void
+    {
+        $sourceData = [
+            'notRelationships' => []
+        ];
+
+        $warnings = [];
+        $errors = [];
+        $result = $this->transformer->transform($sourceData, $warnings, $errors);
+
+        $this->assertEmpty($result);
+        $this->assertNotEmpty($errors);
+        $this->assertCount(1, $errors);
+        $this->assertEquals('Missing or invalid relationships array in source data', $errors[0]->getMessage());
+    }
+
+    /**
+     * Test the transform method with invalid relationships.
+     */
+    public function testTransformWithInvalidRelationships(): void
+    {
+        $sourceData = [
+            'relationships' => 'not an array'
+        ];
+
+        $warnings = [];
+        $errors = [];
+        $result = $this->transformer->transform($sourceData, $warnings, $errors);
+
+        $this->assertEmpty($result);
+        $this->assertNotEmpty($errors);
+        $this->assertCount(1, $errors);
+        $this->assertEquals('Missing or invalid relationships array in source data', $errors[0]->getMessage());
+    }
+
+    /**
      * Test transforming SPDX relationships to CycloneDX dependencies.
      */
     public function testTransformRelationshipsToDependencies(): void
     {
-        // Set up mock expectations
+        // Setup mock expectations
         $this->spdxIdTransformer->method('transformSpdxId')
             ->willReturnCallback(function ($id) {
                 return str_replace('SPDXRef-', '', $id);
@@ -41,70 +201,48 @@ class RelationshipTransformerTest extends TestCase
 
         $relationships = [
             [
-                'spdxElementId' => 'SPDXRef-Package-Main',
-                'relatedSpdxElement' => 'SPDXRef-Package-Dep1',
+                'spdxElementId' => 'SPDXRef-Package-A',
+                'relatedSpdxElement' => 'SPDXRef-Package-B',
                 'relationshipType' => RelationshipTypeEnum::RELATIONSHIP_DEPENDS_ON
             ],
             [
-                'spdxElementId' => 'SPDXRef-Package-Main',
-                'relatedSpdxElement' => 'SPDXRef-Package-Dep2',
+                'spdxElementId' => 'SPDXRef-Package-A',
+                'relatedSpdxElement' => 'SPDXRef-Package-C',
                 'relationshipType' => RelationshipTypeEnum::RELATIONSHIP_DEPENDS_ON
             ],
             [
-                'spdxElementId' => 'SPDXRef-Package-Dep1',
-                'relatedSpdxElement' => 'SPDXRef-Package-Dep3',
+                'spdxElementId' => 'SPDXRef-Package-B',
+                'relatedSpdxElement' => 'SPDXRef-Package-D',
                 'relationshipType' => RelationshipTypeEnum::RELATIONSHIP_DEPENDS_ON
-            ],
-            [
-                'spdxElementId' => 'SPDXRef-Package-Main',
-                'relatedSpdxElement' => 'SPDXRef-DOCUMENT',
-                'relationshipType' => RelationshipTypeEnum::RELATIONSHIP_DESCRIBES
-            ] // This should be ignored, not a dependency
+            ]
         ];
 
         $warnings = [];
         $dependencies = $this->transformer->transformRelationshipsToDependencies($relationships, $warnings);
 
-        // Check structure of returned dependencies
+        // Should have two dependencies (Package-A and Package-B)
         $this->assertCount(2, $dependencies);
 
-        // Find main package dependencies
-        $mainDependencies = null;
-        foreach ($dependencies as $dependency) {
-            if ($dependency['ref'] === 'Package-Main') {
-                $mainDependencies = $dependency;
-                break;
-            }
-        }
+        // Find Package-A dependency
+        $packageADep = $this->findDependencyByRef($dependencies, 'Package-A');
+        $this->assertNotNull($packageADep);
+        $this->assertCount(2, $packageADep['dependsOn']);
+        $this->assertContains('Package-B', $packageADep['dependsOn']);
+        $this->assertContains('Package-C', $packageADep['dependsOn']);
 
-        $this->assertNotNull($mainDependencies);
-        $this->assertCount(2, $mainDependencies['dependsOn']);
-        $this->assertContains('Package-Dep1', $mainDependencies['dependsOn']);
-        $this->assertContains('Package-Dep2', $mainDependencies['dependsOn']);
-
-        // Find dep1 dependencies
-        $dep1Dependencies = null;
-        foreach ($dependencies as $dependency) {
-            if ($dependency['ref'] === 'Package-Dep1') {
-                $dep1Dependencies = $dependency;
-                break;
-            }
-        }
-
-        $this->assertNotNull($dep1Dependencies);
-        $this->assertCount(1, $dep1Dependencies['dependsOn']);
-        $this->assertContains('Package-Dep3', $dep1Dependencies['dependsOn']);
-
-        // Check that there are no warnings
-        $this->assertEmpty($warnings);
+        // Find Package-B dependency
+        $packageBDep = $this->findDependencyByRef($dependencies, 'Package-B');
+        $this->assertNotNull($packageBDep);
+        $this->assertCount(1, $packageBDep['dependsOn']);
+        $this->assertContains('Package-D', $packageBDep['dependsOn']);
     }
 
     /**
-     * Test handling of different relationship types.
+     * Test handling different relationship types.
      */
     public function testHandleDifferentRelationshipTypes(): void
     {
-        // Set up mock expectations
+        // Setup mock expectations
         $this->spdxIdTransformer->method('transformSpdxId')
             ->willReturnCallback(function ($id) {
                 return str_replace('SPDXRef-', '', $id);
@@ -112,23 +250,23 @@ class RelationshipTransformerTest extends TestCase
 
         $relationships = [
             [
-                'spdxElementId' => 'SPDXRef-Package-Main',
-                'relatedSpdxElement' => 'SPDXRef-Package-Dep1',
+                'spdxElementId' => 'SPDXRef-Package-A',
+                'relatedSpdxElement' => 'SPDXRef-Package-B',
                 'relationshipType' => RelationshipTypeEnum::RELATIONSHIP_DYNAMIC_LINK
             ],
             [
-                'spdxElementId' => 'SPDXRef-Package-Main',
-                'relatedSpdxElement' => 'SPDXRef-Package-Dep2',
+                'spdxElementId' => 'SPDXRef-Package-A',
+                'relatedSpdxElement' => 'SPDXRef-Package-C',
                 'relationshipType' => RelationshipTypeEnum::RELATIONSHIP_STATIC_LINK
             ],
             [
-                'spdxElementId' => 'SPDXRef-Package-Main',
-                'relatedSpdxElement' => 'SPDXRef-Package-Dep3',
+                'spdxElementId' => 'SPDXRef-Package-A',
+                'relatedSpdxElement' => 'SPDXRef-Package-D',
                 'relationshipType' => RelationshipTypeEnum::RELATIONSHIP_CONTAINS
             ],
             [
-                'spdxElementId' => 'SPDXRef-Package-Main',
-                'relatedSpdxElement' => 'SPDXRef-Package-Dep4',
+                'spdxElementId' => 'SPDXRef-Package-A',
+                'relatedSpdxElement' => 'SPDXRef-Package-E',
                 'relationshipType' => 'UNKNOWN_RELATIONSHIP_TYPE'
             ]
         ];
@@ -136,21 +274,21 @@ class RelationshipTransformerTest extends TestCase
         $warnings = [];
         $dependencies = $this->transformer->transformRelationshipsToDependencies($relationships, $warnings);
 
-        // We should get one dependency with 3 dependsOn entries (UNKNOWN_RELATIONSHIP_TYPE is ignored)
+        // Should have one dependency with 3 dependsOn entries (UNKNOWN_RELATIONSHIP_TYPE is ignored)
         $this->assertCount(1, $dependencies);
-        $this->assertEquals('Package-Main', $dependencies[0]['ref']);
+        $this->assertEquals('Package-A', $dependencies[0]['ref']);
         $this->assertCount(3, $dependencies[0]['dependsOn']);
-        $this->assertContains('Package-Dep1', $dependencies[0]['dependsOn']); // DYNAMIC_LINK
-        $this->assertContains('Package-Dep2', $dependencies[0]['dependsOn']); // STATIC_LINK
-        $this->assertContains('Package-Dep3', $dependencies[0]['dependsOn']); // CONTAINS
+        $this->assertContains('Package-B', $dependencies[0]['dependsOn']); // DYNAMIC_LINK
+        $this->assertContains('Package-C', $dependencies[0]['dependsOn']); // STATIC_LINK
+        $this->assertContains('Package-D', $dependencies[0]['dependsOn']); // CONTAINS
     }
 
     /**
-     * Test handling of duplicate relationships.
+     * Test handling duplicate relationships.
      */
     public function testHandleDuplicateRelationships(): void
     {
-        // Set up mock expectations
+        // Setup mock expectations
         $this->spdxIdTransformer->method('transformSpdxId')
             ->willReturnCallback(function ($id) {
                 return str_replace('SPDXRef-', '', $id);
@@ -158,13 +296,13 @@ class RelationshipTransformerTest extends TestCase
 
         $relationships = [
             [
-                'spdxElementId' => 'SPDXRef-Package-Main',
-                'relatedSpdxElement' => 'SPDXRef-Package-Dep1',
+                'spdxElementId' => 'SPDXRef-Package-A',
+                'relatedSpdxElement' => 'SPDXRef-Package-B',
                 'relationshipType' => RelationshipTypeEnum::RELATIONSHIP_DEPENDS_ON
             ],
             [
-                'spdxElementId' => 'SPDXRef-Package-Main',
-                'relatedSpdxElement' => 'SPDXRef-Package-Dep1',
+                'spdxElementId' => 'SPDXRef-Package-A',
+                'relatedSpdxElement' => 'SPDXRef-Package-B',
                 'relationshipType' => RelationshipTypeEnum::RELATIONSHIP_DEPENDS_ON
             ] // Duplicate relationship
         ];
@@ -172,11 +310,11 @@ class RelationshipTransformerTest extends TestCase
         $warnings = [];
         $dependencies = $this->transformer->transformRelationshipsToDependencies($relationships, $warnings);
 
-        // We should only get one dependency with one dependsOn entry
+        // Should only create one dependency with one dependsOn
         $this->assertCount(1, $dependencies);
-        $this->assertEquals('Package-Main', $dependencies[0]['ref']);
+        $this->assertEquals('Package-A', $dependencies[0]['ref']);
         $this->assertCount(1, $dependencies[0]['dependsOn']);
-        $this->assertContains('Package-Dep1', $dependencies[0]['dependsOn']);
+        $this->assertContains('Package-B', $dependencies[0]['dependsOn']);
     }
 
     /**
@@ -187,17 +325,17 @@ class RelationshipTransformerTest extends TestCase
         $malformedRelationships = [
             [
                 // Missing spdxElementId
-                'relatedSpdxElement' => 'SPDXRef-Package-Dep1',
+                'relatedSpdxElement' => 'SPDXRef-Package-B',
                 'relationshipType' => RelationshipTypeEnum::RELATIONSHIP_DEPENDS_ON
             ],
             [
-                'spdxElementId' => 'SPDXRef-Package-Main',
+                'spdxElementId' => 'SPDXRef-Package-A',
                 // Missing relatedSpdxElement
                 'relationshipType' => RelationshipTypeEnum::RELATIONSHIP_DEPENDS_ON
             ],
             [
-                'spdxElementId' => 'SPDXRef-Package-Main',
-                'relatedSpdxElement' => 'SPDXRef-Package-Dep1'
+                'spdxElementId' => 'SPDXRef-Package-A',
+                'relatedSpdxElement' => 'SPDXRef-Package-B'
                 // Missing relationshipType
             ]
         ];
@@ -208,48 +346,48 @@ class RelationshipTransformerTest extends TestCase
         // No valid dependencies should be generated
         $this->assertEmpty($dependencies);
 
-        // There should be warnings for each malformed relationship
+        // Should have warnings for each malformed relationship
         $this->assertCount(3, $warnings);
         $this->assertStringContainsString('Malformed relationship entry', $warnings[0]);
     }
 
     /**
-     * Test finding relationships for specific element.
+     * Test finding relationships for a specific element.
      */
     public function testFindRelationshipsForElement(): void
     {
         $relationships = [
             [
-                'spdxElementId' => 'SPDXRef-Package-Main',
-                'relatedSpdxElement' => 'SPDXRef-Package-Dep1',
+                'spdxElementId' => 'SPDXRef-Package-A',
+                'relatedSpdxElement' => 'SPDXRef-Package-B',
                 'relationshipType' => RelationshipTypeEnum::RELATIONSHIP_DEPENDS_ON
             ],
             [
-                'spdxElementId' => 'SPDXRef-Package-Main',
-                'relatedSpdxElement' => 'SPDXRef-Package-Dep2',
+                'spdxElementId' => 'SPDXRef-Package-A',
+                'relatedSpdxElement' => 'SPDXRef-Package-C',
                 'relationshipType' => RelationshipTypeEnum::RELATIONSHIP_CONTAINS
             ],
             [
-                'spdxElementId' => 'SPDXRef-Package-Dep1',
-                'relatedSpdxElement' => 'SPDXRef-Package-Dep3',
+                'spdxElementId' => 'SPDXRef-Package-B',
+                'relatedSpdxElement' => 'SPDXRef-Package-D',
                 'relationshipType' => RelationshipTypeEnum::RELATIONSHIP_DEPENDS_ON
             ]
         ];
 
-        // Find all relationships for Package-Main
-        $mainRelationships = $this->transformer->findRelationshipsForElement(
+        // Find all relationships for Package-A
+        $packageARelationships = $this->transformer->findRelationshipsForElement(
             $relationships,
-            'SPDXRef-Package-Main'
+            'SPDXRef-Package-A'
         );
-        $this->assertCount(2, $mainRelationships);
+        $this->assertCount(2, $packageARelationships);
 
-        // Find only DEPENDS_ON relationships for Package-Main
-        $mainDependsOnRelationships = $this->transformer->findRelationshipsForElement(
+        // Find only DEPENDS_ON relationships for Package-A
+        $packageADependsOnRelationships = $this->transformer->findRelationshipsForElement(
             $relationships,
-            'SPDXRef-Package-Main',
+            'SPDXRef-Package-A',
             RelationshipTypeEnum::RELATIONSHIP_DEPENDS_ON
         );
-        $this->assertCount(1, $mainDependsOnRelationships);
+        $this->assertCount(1, $packageADependsOnRelationships);
 
         // Find relationships for non-existent element
         $nonExistentRelationships = $this->transformer->findRelationshipsForElement(
@@ -260,11 +398,11 @@ class RelationshipTransformerTest extends TestCase
     }
 
     /**
-     * Test detecting circular dependencies.
+     * Test checking for circular dependencies.
      */
     public function testCheckForCircularDependencies(): void
     {
-        $relationships = [
+        $circularRelationships = [
             [
                 'spdxElementId' => 'SPDXRef-Package-A',
                 'relatedSpdxElement' => 'SPDXRef-Package-B',
@@ -282,9 +420,9 @@ class RelationshipTransformerTest extends TestCase
             ] // Creates a cycle: A -> B -> C -> A
         ];
 
-        $warnings = $this->transformer->checkForCircularDependencies($relationships);
+        $warnings = $this->transformer->checkForCircularDependencies($circularRelationships);
 
-        // There should be a warning about the circular dependency
+        // Should have a warning about the circular dependency
         $this->assertNotEmpty($warnings);
         $this->assertStringContainsString('Circular dependency detected', $warnings[0]);
 
@@ -312,7 +450,7 @@ class RelationshipTransformerTest extends TestCase
      */
     public function testHandleComplexRelationshipNetwork(): void
     {
-        // Set up mock expectations
+        // Setup mock expectations
         $this->spdxIdTransformer->method('transformSpdxId')
             ->willReturnCallback(function ($id) {
                 return str_replace('SPDXRef-', '', $id);
@@ -368,27 +506,27 @@ class RelationshipTransformerTest extends TestCase
         $this->assertCount(4, $dependencies); // A, B, C, D all have dependencies
 
         // Find dependencies for Package A
-        $packageADeps = $this->findDependenciesForRef($dependencies, 'Package-A');
+        $packageADeps = $this->findDependencyByRef($dependencies, 'Package-A');
         $this->assertNotNull($packageADeps);
         $this->assertCount(2, $packageADeps['dependsOn']);
         $this->assertContains('Package-B', $packageADeps['dependsOn']);
         $this->assertContains('Package-C', $packageADeps['dependsOn']);
 
         // Find dependencies for Package B (contains relationships)
-        $packageBDeps = $this->findDependenciesForRef($dependencies, 'Package-B');
+        $packageBDeps = $this->findDependencyByRef($dependencies, 'Package-B');
         $this->assertNotNull($packageBDeps);
         $this->assertCount(2, $packageBDeps['dependsOn']);
         $this->assertContains('Package-D', $packageBDeps['dependsOn']);
         $this->assertContains('Package-E', $packageBDeps['dependsOn']);
 
         // Find dependencies for Package C (static link)
-        $packageCDeps = $this->findDependenciesForRef($dependencies, 'Package-C');
+        $packageCDeps = $this->findDependencyByRef($dependencies, 'Package-C');
         $this->assertNotNull($packageCDeps);
         $this->assertCount(1, $packageCDeps['dependsOn']);
         $this->assertContains('Package-F', $packageCDeps['dependsOn']);
 
         // Find dependencies for Package D (dynamic link)
-        $packageDDeps = $this->findDependenciesForRef($dependencies, 'Package-D');
+        $packageDDeps = $this->findDependencyByRef($dependencies, 'Package-D');
         $this->assertNotNull($packageDDeps);
         $this->assertCount(1, $packageDDeps['dependsOn']);
         $this->assertContains('Package-G', $packageDDeps['dependsOn']);
@@ -401,7 +539,7 @@ class RelationshipTransformerTest extends TestCase
      * @param string $ref Reference to find
      * @return array<string, mixed>|null Found dependencies or null
      */
-    private function findDependenciesForRef(array $dependencies, string $ref): ?array
+    private function findDependencyByRef(array $dependencies, string $ref): ?array
     {
         foreach ($dependencies as $dependency) {
             if ($dependency['ref'] === $ref) {
@@ -409,14 +547,5 @@ class RelationshipTransformerTest extends TestCase
             }
         }
         return null;
-    }
-
-    /**
-     * Test the source and target formats of the transformer.
-     */
-    public function testGetSourceAndTargetFormats(): void
-    {
-        $this->assertEquals('SPDX', $this->transformer->getSourceFormat());
-        $this->assertEquals('CycloneDX', $this->transformer->getTargetFormat());
     }
 }

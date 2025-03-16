@@ -3,7 +3,10 @@
 namespace SBOMinator\Transformatron\Tests\Unit\Transformer;
 
 use PHPUnit\Framework\TestCase;
+use SBOMinator\Transformatron\Enum\FormatEnum;
+use SBOMinator\Transformatron\Error\ConversionError;
 use SBOMinator\Transformatron\Transformer\HashTransformer;
+use SBOMinator\Transformatron\Transformer\TransformerInterface;
 
 /**
  * Test cases for HashTransformer class.
@@ -18,6 +21,102 @@ class HashTransformerTest extends TestCase
     protected function setUp(): void
     {
         $this->transformer = new HashTransformer();
+    }
+
+    /**
+     * Test that the transformer implements the TransformerInterface.
+     */
+    public function testImplementsTransformerInterface(): void
+    {
+        $this->assertInstanceOf(TransformerInterface::class, $this->transformer);
+    }
+
+    /**
+     * Test the source and target formats of the transformer.
+     */
+    public function testGetSourceAndTargetFormats(): void
+    {
+        $this->assertEquals(FormatEnum::FORMAT_SPDX, $this->transformer->getSourceFormat());
+        $this->assertEquals(FormatEnum::FORMAT_CYCLONEDX, $this->transformer->getTargetFormat());
+    }
+
+    /**
+     * Test the transform method with SPDX to CycloneDX conversion.
+     */
+    public function testTransformSpdxToCycloneDx(): void
+    {
+        $checksums = [
+            [
+                'algorithm' => 'SHA1',
+                'checksumValue' => 'a1b2c3d4e5f6'
+            ],
+            [
+                'algorithm' => 'SHA256',
+                'checksumValue' => '1a2b3c4d5e6f'
+            ]
+        ];
+
+        $warnings = [];
+        $errors = [];
+        $hashes = $this->transformer->transform($checksums, $warnings, $errors);
+
+        $this->assertCount(2, $hashes);
+        $this->assertEquals('SHA-1', $hashes[0]['alg']);
+        $this->assertEquals('a1b2c3d4e5f6', $hashes[0]['content']);
+        $this->assertEquals('SHA-256', $hashes[1]['alg']);
+        $this->assertEquals('1a2b3c4d5e6f', $hashes[1]['content']);
+        $this->assertEmpty($warnings);
+        $this->assertEmpty($errors);
+    }
+
+    /**
+     * Test the transform method with CycloneDX to SPDX conversion.
+     */
+    public function testTransformCycloneDxToSpdx(): void
+    {
+        $hashes = [
+            [
+                'alg' => 'SHA-1',
+                'content' => 'a1b2c3d4e5f6'
+            ],
+            [
+                'alg' => 'SHA-256',
+                'content' => '1a2b3c4d5e6f'
+            ]
+        ];
+
+        $warnings = [];
+        $errors = [];
+        $checksums = $this->transformer->transform($hashes, $warnings, $errors);
+
+        $this->assertCount(2, $checksums);
+        $this->assertEquals('SHA1', $checksums[0]['algorithm']);
+        $this->assertEquals('a1b2c3d4e5f6', $checksums[0]['checksumValue']);
+        $this->assertEquals('SHA256', $checksums[1]['algorithm']);
+        $this->assertEquals('1a2b3c4d5e6f', $checksums[1]['checksumValue']);
+        $this->assertEmpty($warnings);
+        $this->assertEmpty($errors);
+    }
+
+    /**
+     * Test the transform method with unknown format.
+     */
+    public function testTransformWithUnknownFormat(): void
+    {
+        $invalidData = [
+            [
+                'invalid_key' => 'invalid_value'
+            ]
+        ];
+
+        $warnings = [];
+        $errors = [];
+        $result = $this->transformer->transform($invalidData, $warnings, $errors);
+
+        $this->assertEmpty($result);
+        $this->assertNotEmpty($errors);
+        $this->assertCount(1, $errors);
+        $this->assertEquals('Unknown hash data format', $errors[0]->getMessage());
     }
 
     /**

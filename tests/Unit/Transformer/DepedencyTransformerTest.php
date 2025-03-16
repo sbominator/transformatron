@@ -3,9 +3,12 @@
 namespace SBOMinator\Transformatron\Tests\Unit\Transformer;
 
 use PHPUnit\Framework\TestCase;
+use SBOMinator\Transformatron\Enum\FormatEnum;
 use SBOMinator\Transformatron\Enum\RelationshipTypeEnum;
+use SBOMinator\Transformatron\Error\ConversionError;
 use SBOMinator\Transformatron\Transformer\DependencyTransformer;
 use SBOMinator\Transformatron\Transformer\SpdxIdTransformer;
+use SBOMinator\Transformatron\Transformer\TransformerInterface;
 
 /**
  * Test cases for DependencyTransformer class.
@@ -26,6 +29,114 @@ class DependencyTransformerTest extends TestCase
     {
         $this->spdxIdTransformer = $this->createMock(SpdxIdTransformer::class);
         $this->transformer = new DependencyTransformer($this->spdxIdTransformer);
+    }
+
+    /**
+     * Test that the transformer implements the TransformerInterface.
+     */
+    public function testImplementsTransformerInterface(): void
+    {
+        $this->assertInstanceOf(TransformerInterface::class, $this->transformer);
+    }
+
+    /**
+     * Test the source and target formats of the transformer.
+     */
+    public function testGetSourceAndTargetFormats(): void
+    {
+        $this->assertEquals(FormatEnum::FORMAT_CYCLONEDX, $this->transformer->getSourceFormat());
+        $this->assertEquals(FormatEnum::FORMAT_SPDX, $this->transformer->getTargetFormat());
+    }
+
+    /**
+     * Test the transform method with valid dependencies.
+     */
+    public function testTransformWithValidDependencies(): void
+    {
+        // Setup mock expectations
+        $this->spdxIdTransformer->method('formatAsSpdxId')
+            ->willReturnCallback(function ($id) {
+                return 'SPDXRef-' . $id;
+            });
+
+        // Create test data
+        $sourceData = [
+            'dependencies' => [
+                [
+                    'ref' => 'component-1',
+                    'dependsOn' => ['component-2', 'component-3']
+                ],
+                [
+                    'ref' => 'component-2',
+                    'dependsOn' => ['component-4']
+                ]
+            ]
+        ];
+
+        $warnings = [];
+        $errors = [];
+        $result = $this->transformer->transform($sourceData, $warnings, $errors);
+
+        // Verify results
+        $this->assertArrayHasKey('relationships', $result);
+        $this->assertCount(3, $result['relationships']);
+
+        // Check that component-1 depends on component-2 and component-3
+        $component1Relationships = array_filter($result['relationships'], function ($rel) {
+            return $rel['spdxElementId'] === 'SPDXRef-component-1';
+        });
+        $this->assertCount(2, $component1Relationships);
+
+        // Check that component-2 depends on component-4
+        $component2Relationships = array_filter($result['relationships'], function ($rel) {
+            return $rel['spdxElementId'] === 'SPDXRef-component-2';
+        });
+        $this->assertCount(1, $component2Relationships);
+
+        // Check that all relationships are DEPENDS_ON
+        foreach ($result['relationships'] as $relationship) {
+            $this->assertEquals(RelationshipTypeEnum::RELATIONSHIP_DEPENDS_ON, $relationship['relationshipType']);
+        }
+
+        $this->assertEmpty($errors);
+    }
+
+    /**
+     * Test the transform method with missing dependencies.
+     */
+    public function testTransformWithMissingDependencies(): void
+    {
+        $sourceData = [
+            'notDependencies' => []
+        ];
+
+        $warnings = [];
+        $errors = [];
+        $result = $this->transformer->transform($sourceData, $warnings, $errors);
+
+        $this->assertEmpty($result);
+        $this->assertNotEmpty($errors);
+        $this->assertCount(1, $errors);
+        $this->assertEquals('Missing or invalid dependencies array in source data', $errors[0]->getMessage());
+    }
+
+    /**
+     * Test the transform method with invalid dependencies.
+     */
+    public function testTransformWithInvalidDependencies(): void
+    {
+        $sourceData = [
+            'dependencies' => 'not an array'
+        ];
+
+        $warnings = [];
+        $errors = [];
+        $result = $this->transformer->transform($sourceData, $warnings, $errors);
+
+        $this->assertEmpty($result);
+        $this->assertNotEmpty($errors);
+        $this->assertCount(1, $errors);
+        $this->assertEquals('Missing or invalid dependencies array in source data', $errors[0]->getMessage());
     }
 
     /**
@@ -281,9 +392,9 @@ class DependencyTransformerTest extends TestCase
     }
 
     /**
-     * Test with complex dependency network.
+     * Test processing nested components.
      */
-    public function testComplexDependencyNetwork(): void
+    public function testProcessNestedComponents(): void
     {
         // Set up mock expectations
         $this->spdxIdTransformer->method('formatAsSpdxId')
@@ -291,75 +402,68 @@ class DependencyTransformerTest extends TestCase
                 return 'SPDXRef-' . $id;
             });
 
-        $dependencies = [
-            [
-                'ref' => 'app',
-                'dependsOn' => ['lib-1', 'lib-2', 'lib-3']
-            ],
-            [
-                'ref' => 'lib-1',
-                'dependsOn' => ['lib-4', 'lib-5']
-            ],
-            [
-                'ref' => 'lib-2',
-                'dependsOn' => ['lib-5'] // Shared dependency with lib-1
-            ],
-            [
-                'ref' => 'lib-3',
-                'dependsOn' => ['lib-6']
-            ],
-            [
-                'ref' => 'lib-4',
-                'dependsOn' => ['lib-7']
-            ],
-            [
-                'ref' => 'lib-5',
-                'dependsOn' => ['lib-7'] // Creates diamond dependency: lib-1 -> lib-5 -> lib-7 and lib-1 -> lib-4 -> lib-7
+        // Create a test-accessible version of the method
+        $method = new \ReflectionMethod(DependencyTransformer::class, 'processNestedComponents');
+        $method->setAccessible(true);
+
+        $parentComponent = [
+            'bom-ref' => 'parent',
+            'name' => 'Parent Component',
+            'components' => [
+                [
+                    'bom-ref' => 'child1',
+                    'name' => 'Child 1'
+                ],
+                [
+                    'bom-ref' => 'child2',
+                    'name' => 'Child 2',
+                    'components' => [
+                        [
+                            'bom-ref' => 'grandchild1',
+                            'name' => 'Grandchild 1'
+                        ]
+                    ]
+                ]
             ]
         ];
 
         $warnings = [];
-        $relationships = $this->transformer->transformDependenciesToRelationships($dependencies, $warnings);
+        $relationships = $method->invokeArgs($this->transformer, [$parentComponent, &$warnings]);
 
-        // Check count - should be 1 relationship per dependsOn entry
-        // 3 (app) + 2 (lib-1) + 1 (lib-2) + 1 (lib-3) + 1 (lib-4) + 1 (lib-5) = 9 relationships
-        $this->assertCount(9, $relationships);
+        // Should generate 3 CONTAINS relationships
+        $this->assertCount(3, $relationships);
 
-        // Check each source node has the correct number of relationships
-        $appRelationships = array_filter($relationships, function($rel) {
-            return $rel['spdxElementId'] === 'SPDXRef-app';
-        });
-        $this->assertCount(3, $appRelationships);
+        // Check parent-child relationships
+        $parentToChild1 = $this->findRelationship($relationships, 'SPDXRef-parent', 'SPDXRef-child1');
+        $this->assertNotNull($parentToChild1);
+        $this->assertEquals(RelationshipTypeEnum::RELATIONSHIP_CONTAINS, $parentToChild1['relationshipType']);
 
-        $lib1Relationships = array_filter($relationships, function($rel) {
-            return $rel['spdxElementId'] === 'SPDXRef-lib-1';
-        });
-        $this->assertCount(2, $lib1Relationships);
+        $parentToChild2 = $this->findRelationship($relationships, 'SPDXRef-parent', 'SPDXRef-child2');
+        $this->assertNotNull($parentToChild2);
+        $this->assertEquals(RelationshipTypeEnum::RELATIONSHIP_CONTAINS, $parentToChild2['relationshipType']);
 
-        // Check no duplicates even with diamond dependencies
-        $lib5Targets = array_map(function($rel) {
-            return $rel['relatedSpdxElement'];
-        }, array_filter($relationships, function($rel) {
-            return $rel['spdxElementId'] === 'SPDXRef-lib-5';
-        }));
-        $this->assertCount(1, $lib5Targets);
-        $this->assertContains('SPDXRef-lib-7', $lib5Targets);
-
-        // Spot check a specific relationship
-        $lib3ToLib6 = array_filter($relationships, function($rel) {
-            return $rel['spdxElementId'] === 'SPDXRef-lib-3' &&
-                $rel['relatedSpdxElement'] === 'SPDXRef-lib-6';
-        });
-        $this->assertCount(1, $lib3ToLib6);
-        $this->assertEquals(RelationshipTypeEnum::RELATIONSHIP_DEPENDS_ON, $lib3ToLib6[array_key_first($lib3ToLib6)]['relationshipType']);
+        // Check child-grandchild relationship
+        $child2ToGrandchild = $this->findRelationship($relationships, 'SPDXRef-child2', 'SPDXRef-grandchild1');
+        $this->assertNotNull($child2ToGrandchild);
+        $this->assertEquals(RelationshipTypeEnum::RELATIONSHIP_CONTAINS, $child2ToGrandchild['relationshipType']);
     }
 
     /**
-     * Test the source and target formats of the transformer.
+     * Helper method to find a specific relationship.
+     *
+     * @param array<array<string, string>> $relationships Array of relationships
+     * @param string $source Source SPDX ID
+     * @param string $target Target SPDX ID
+     * @return array<string, string>|null Found relationship or null
      */
-    public function testGetSourceAndTargetFormats(): void
+    private function findRelationship(array $relationships, string $source, string $target): ?array
     {
-        $this->assertEquals('CycloneDX', $this->transformer->getSourceFormat());
-        $this->assertEquals('SPDX', $this->transformer->getTargetFormat());
+        foreach ($relationships as $relationship) {
+            if ($relationship['spdxElementId'] === $source &&
+                $relationship['relatedSpdxElement'] === $target) {
+                return $relationship;
+            }
+        }
+        return null;
     }
 }

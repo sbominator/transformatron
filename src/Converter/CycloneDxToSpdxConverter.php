@@ -181,15 +181,58 @@ class CycloneDxToSpdxConverter extends AbstractConverter
                 continue;
             }
 
-            $value = $this->transformFieldValue(
-                $sourceData[$cyclonedxField],
-                $mapping['transform'],
-                $cyclonedxField,
-                $warnings,
-                $errors
-            );
+            // Use transform method with the appropriate transformer based on field
+            switch ($cyclonedxField) {
+                case 'metadata':
+                    $transformResult = $this->metadataTransformer->transform(['metadata' => $sourceData[$cyclonedxField]], $warnings, $errors);
+                    if (isset($transformResult['creationInfo'])) {
+                        $targetData['creationInfo'] = $transformResult['creationInfo'];
+                    }
+                    break;
 
-            $targetData[$mapping['field']] = $value;
+                case 'components':
+                    $transformResult = $this->componentTransformer->transform(['components' => $sourceData[$cyclonedxField]], $warnings, $errors);
+                    if (isset($transformResult['packages'])) {
+                        $targetData['packages'] = $transformResult['packages'];
+                    }
+                    break;
+
+                case 'dependencies':
+                    $transformResult = $this->dependencyTransformer->transform(['dependencies' => $sourceData[$cyclonedxField]], $warnings, $errors);
+                    if (isset($transformResult['relationships'])) {
+                        $targetData['relationships'] = $transformResult['relationships'];
+                    }
+                    break;
+
+                case 'specVersion':
+                    $transformResult = $this->referenceTransformer->transform(['specVersion' => $sourceData[$cyclonedxField]], $warnings, $errors);
+                    if (isset($transformResult['spdxVersion'])) {
+                        $targetData['spdxVersion'] = $transformResult['spdxVersion'];
+                    }
+                    break;
+
+                case 'serialNumber':
+                    // Note: We ignore the serial number and always use SPDXRef-DOCUMENT
+                    // for the document ID to maintain consistency with the test expectations.
+                    $targetData['SPDXID'] = 'SPDXRef-DOCUMENT';
+                    break;
+
+                default:
+                    // For direct mappings with no transformation needed
+                    if ($mapping['transform'] === null) {
+                        $targetData[$mapping['field']] = $sourceData[$cyclonedxField];
+                    } else {
+                        // Use the old method for any remaining transformations
+                        $targetData[$mapping['field']] = $this->transformFieldValue(
+                            $sourceData[$cyclonedxField],
+                            $mapping['transform'],
+                            $cyclonedxField,
+                            $warnings,
+                            $errors
+                        );
+                    }
+                    break;
+            }
         }
 
         // If name is not set, use the serial number or a default
@@ -231,91 +274,6 @@ class CycloneDxToSpdxConverter extends AbstractConverter
         }
 
         return $targetData;
-    }
-
-    /**
-     * Transform CycloneDX spec version to SPDX version.
-     *
-     * @param string $specVersion The CycloneDX spec version
-     * @return string The SPDX version
-     */
-    protected function transformSpecVersion(string $specVersion): string
-    {
-        return $this->referenceTransformer->transformSpecVersion($specVersion);
-    }
-
-    /**
-     * Transform CycloneDX serial number to SPDX ID.
-     *
-     * Note: We ignore the serial number and always use SPDXRef-DOCUMENT
-     * for the document ID to maintain consistency with the test expectations.
-     *
-     * @param string $serialNumber The CycloneDX serial number
-     * @return string The SPDX ID
-     */
-    protected function transformSerialNumber(string $serialNumber): string
-    {
-        // Always return SPDXRef-DOCUMENT as the document ID
-        return 'SPDXRef-DOCUMENT';
-    }
-
-    /**
-     * Transform CycloneDX metadata to SPDX creation info.
-     *
-     * @param array<string, mixed> $metadata CycloneDX metadata
-     * @return array<string, mixed> SPDX creation info
-     */
-    protected function transformMetadata(array $metadata): array
-    {
-        return $this->metadataTransformer->transformMetadata($metadata);
-    }
-
-    /**
-     * Transform CycloneDX components to SPDX packages.
-     *
-     * @param array<array<string, mixed>> $components CycloneDX components array
-     * @param array<string> &$warnings Array to collect warnings during conversion
-     * @param array<ConversionError> &$errors Array to collect errors during conversion
-     * @return array<array<string, mixed>> SPDX packages array
-     */
-    protected function transformComponentsToPackages(array $components, array &$warnings, array &$errors): array
-    {
-        try {
-            return $this->componentTransformer->transformComponentsToPackages($components, $warnings);
-        } catch (\Exception $e) {
-            $errors[] = ConversionError::createError(
-                "Error transforming components to packages: " . $e->getMessage(),
-                "ComponentTransformer",
-                ['component_count' => count($components)],
-                'component_transform_error',
-                $e
-            );
-            return [];
-        }
-    }
-
-    /**
-     * Transform CycloneDX dependencies to SPDX relationships.
-     *
-     * @param array<array<string, mixed>> $dependencies CycloneDX dependencies array
-     * @param array<string> &$warnings Array to collect warnings during conversion
-     * @param array<ConversionError> &$errors Array to collect errors during conversion
-     * @return array<array<string, string>> SPDX relationships array
-     */
-    protected function transformDependenciesToRelationships(array $dependencies, array &$warnings, array &$errors): array
-    {
-        try {
-            return $this->dependencyTransformer->transformDependenciesToRelationships($dependencies, $warnings);
-        } catch (\Exception $e) {
-            $errors[] = ConversionError::createError(
-                "Error transforming dependencies to relationships: " . $e->getMessage(),
-                "DependencyTransformer",
-                ['dependency_count' => count($dependencies)],
-                'dependency_transform_error',
-                $e
-            );
-            return [];
-        }
     }
 
     /**

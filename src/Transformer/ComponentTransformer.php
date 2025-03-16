@@ -4,13 +4,14 @@ namespace SBOMinator\Transformatron\Transformer;
 
 use SBOMinator\Transformatron\Config\PackageComponentMappingConfig;
 use SBOMinator\Transformatron\Enum\FormatEnum;
+use SBOMinator\Transformatron\Error\ConversionError;
 
 /**
  * Transformer for CycloneDX components.
  *
  * Handles transformation of CycloneDX components to SPDX packages.
  */
-class ComponentTransformer
+class ComponentTransformer implements TransformerInterface
 {
     /**
      * @var HashTransformer
@@ -42,6 +43,61 @@ class ComponentTransformer
         $this->hashTransformer = $hashTransformer;
         $this->licenseTransformer = $licenseTransformer;
         $this->spdxIdTransformer = $spdxIdTransformer;
+    }
+
+    /**
+     * Get the source format this transformer handles.
+     *
+     * @return string The format (e.g., 'CycloneDX')
+     */
+    public function getSourceFormat(): string
+    {
+        return FormatEnum::FORMAT_CYCLONEDX;
+    }
+
+    /**
+     * Get the target format for this transformer.
+     *
+     * @return string The target format (e.g., 'SPDX')
+     */
+    public function getTargetFormat(): string
+    {
+        return FormatEnum::FORMAT_SPDX;
+    }
+
+    /**
+     * Transform CycloneDX components to SPDX packages.
+     *
+     * @param array<string, mixed> $sourceData Source data containing CycloneDX components
+     * @param array<string> &$warnings Array to collect warnings during transformation
+     * @param array<ConversionError> &$errors Array to collect errors during transformation
+     * @return array<string, mixed> The transformed SPDX packages data
+     */
+    public function transform(array $sourceData, array &$warnings, array &$errors): array
+    {
+        if (!isset($sourceData['components']) || !is_array($sourceData['components'])) {
+            $errors[] = ConversionError::createError(
+                'Missing or invalid components array in source data',
+                'ComponentTransformer',
+                ['sourceData' => $sourceData],
+                'invalid_components_data'
+            );
+            return [];
+        }
+
+        try {
+            $packages = $this->transformComponentsToPackages($sourceData['components'], $warnings);
+            return ['packages' => $packages];
+        } catch (\Exception $e) {
+            $errors[] = ConversionError::createError(
+                "Error transforming components to packages: " . $e->getMessage(),
+                "ComponentTransformer",
+                ['component_count' => count($sourceData['components'])],
+                'component_transform_error',
+                $e
+            );
+            return [];
+        }
     }
 
     /**
@@ -226,25 +282,5 @@ class ComponentTransformer
         foreach ($unknownFields as $field) {
             $warnings[] = "Unknown or unmapped component field: {$field}";
         }
-    }
-
-    /**
-     * Get the source format this transformer handles.
-     *
-     * @return string The format (e.g., 'CycloneDX')
-     */
-    public function getSourceFormat(): string
-    {
-        return FormatEnum::FORMAT_CYCLONEDX;
-    }
-
-    /**
-     * Get the target format for this transformer.
-     *
-     * @return string The target format (e.g., 'SPDX')
-     */
-    public function getTargetFormat(): string
-    {
-        return FormatEnum::FORMAT_SPDX;
     }
 }

@@ -3,6 +3,7 @@
 namespace SBOMinator\Transformatron\Transformer;
 
 use SBOMinator\Transformatron\Enum\FormatEnum;
+use SBOMinator\Transformatron\Error\ConversionError;
 
 /**
  * Transformer for license information.
@@ -10,8 +11,105 @@ use SBOMinator\Transformatron\Enum\FormatEnum;
  * Handles transformation between SPDX and CycloneDX license formats.
  * Supports both simple license IDs and complex license expressions.
  */
-class LicenseTransformer
+class LicenseTransformer implements TransformerInterface
 {
+    /**
+     * Get the source format this transformer handles.
+     *
+     * @return string The format (e.g., 'SPDX')
+     */
+    public function getSourceFormat(): string
+    {
+        return FormatEnum::FORMAT_SPDX;
+    }
+
+    /**
+     * Get the target format for this transformer.
+     *
+     * @return string The target format (e.g., 'CycloneDX')
+     */
+    public function getTargetFormat(): string
+    {
+        return FormatEnum::FORMAT_CYCLONEDX;
+    }
+
+    /**
+     * Transform license data between formats.
+     *
+     * @param array<string, mixed> $sourceData Source license data
+     * @param array<string> &$warnings Array to collect warnings during transformation
+     * @param array<ConversionError> &$errors Array to collect errors during transformation
+     * @return array<string, mixed> Transformed license data
+     */
+    public function transform(array $sourceData, array &$warnings, array &$errors): array
+    {
+        $sourceFormat = $this->detectSourceFormat($sourceData);
+
+        if ($sourceFormat === FormatEnum::FORMAT_SPDX) {
+            // For SPDX, we expect a string in the sourceData
+            if (isset($sourceData['license']) && is_string($sourceData['license'])) {
+                return $this->transformSpdxLicenseToCycloneDx($sourceData['license'], $warnings);
+            }
+
+            $errors[] = ConversionError::createError(
+                'Invalid SPDX license data format',
+                'LicenseTransformer',
+                ['data' => $sourceData],
+                'invalid_spdx_license_format'
+            );
+            return [];
+        }
+
+        if ($sourceFormat === FormatEnum::FORMAT_CYCLONEDX) {
+            // For CycloneDX, we expect an array of license objects
+            return [
+                'license' => $this->transformCycloneDxLicenseToSpdx($sourceData, $warnings)
+            ];
+        }
+
+        $errors[] = ConversionError::createError(
+            'Unknown license data format',
+            'LicenseTransformer',
+            ['data' => $sourceData],
+            'unknown_license_format'
+        );
+
+        return [];
+    }
+
+    /**
+     * Detect the format of the license data.
+     *
+     * @param array<string, mixed> $data License data to analyze
+     * @return string|null Detected format (SPDX or CycloneDX) or null if unknown
+     */
+    private function detectSourceFormat(array $data): ?string
+    {
+        if (empty($data)) {
+            return null;
+        }
+
+        // Check for SPDX format - typically a single string with a license identifier
+        if (isset($data['license']) && is_string($data['license'])) {
+            return FormatEnum::FORMAT_SPDX;
+        }
+
+        // Check for CycloneDX format - typically an array of license objects
+        $isLicenseArray = true;
+        foreach ($data as $item) {
+            if (!is_array($item) || !isset($item['license'])) {
+                $isLicenseArray = false;
+                break;
+            }
+        }
+
+        if ($isLicenseArray && !empty($data)) {
+            return FormatEnum::FORMAT_CYCLONEDX;
+        }
+
+        return null;
+    }
+
     /**
      * Transform SPDX license information to CycloneDX license format.
      *
@@ -184,25 +282,5 @@ class LicenseTransformer
             'CC0-1.0',
             'CC-BY-4.0'
         ];
-    }
-
-    /**
-     * Get the source format this transformer handles.
-     *
-     * @return string The format (e.g., 'SPDX')
-     */
-    public function getSourceFormat(): string
-    {
-        return FormatEnum::FORMAT_SPDX;
-    }
-
-    /**
-     * Get the target format for this transformer.
-     *
-     * @return string The target format (e.g., 'CycloneDX')
-     */
-    public function getTargetFormat(): string
-    {
-        return FormatEnum::FORMAT_CYCLONEDX;
     }
 }

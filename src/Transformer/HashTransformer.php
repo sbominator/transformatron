@@ -3,14 +3,96 @@
 namespace SBOMinator\Transformatron\Transformer;
 
 use SBOMinator\Transformatron\Enum\FormatEnum;
+use SBOMinator\Transformatron\Error\ConversionError;
 
 /**
  * Transformer for hash/checksum data.
  *
  * Handles transformation between SPDX checksums and CycloneDX hashes.
  */
-class HashTransformer
+class HashTransformer implements TransformerInterface
 {
+    /**
+     * Get the source format this transformer handles.
+     *
+     * @return string The format (e.g., 'SPDX')
+     */
+    public function getSourceFormat(): string
+    {
+        return FormatEnum::FORMAT_SPDX;
+    }
+
+    /**
+     * Get the target format for this transformer.
+     *
+     * @return string The target format (e.g., 'CycloneDX')
+     */
+    public function getTargetFormat(): string
+    {
+        return FormatEnum::FORMAT_CYCLONEDX;
+    }
+
+    /**
+     * Transform hash data between formats.
+     *
+     * @param array<string, mixed> $sourceData Source hash data
+     * @param array<string> &$warnings Array to collect warnings during transformation
+     * @param array<ConversionError> &$errors Array to collect errors during transformation
+     * @return array<string, mixed> Transformed hash data
+     */
+    public function transform(array $sourceData, array &$warnings, array &$errors): array
+    {
+        $sourceFormat = $this->detectSourceFormat($sourceData);
+
+        // Handle SPDX format
+        if ($sourceFormat === FormatEnum::FORMAT_SPDX) {
+            return $this->transformSpdxChecksumsToCycloneDxHashes($sourceData, $warnings);
+        }
+
+        // Handle CycloneDX format
+        if ($sourceFormat === FormatEnum::FORMAT_CYCLONEDX) {
+            return $this->transformCycloneDxHashesToSpdxChecksums($sourceData, $warnings);
+        }
+
+        // Unknown format - add an error
+        $errors[] = ConversionError::createError(
+            'Unknown hash data format',
+            'HashTransformer',
+            ['data' => $sourceData],
+            'unknown_hash_format'
+        );
+
+        return [];
+    }
+
+    /**
+     * Detect the format of the hash data.
+     *
+     * @param array<array<string, string>> $data Hash data to analyze
+     * @return string|null Detected format (SPDX or CycloneDX) or null if unknown
+     */
+    private function detectSourceFormat(array $data): ?string
+    {
+        if (empty($data)) {
+            return FormatEnum::FORMAT_SPDX;
+        }
+
+        $firstItem = reset($data);
+
+        // Check for SPDX format
+        if (isset($firstItem['algorithm']) && isset($firstItem['checksumValue'])) {
+            return FormatEnum::FORMAT_SPDX;
+        }
+
+        // Check for CycloneDX format
+        if (isset($firstItem['alg']) && isset($firstItem['content'])) {
+            return FormatEnum::FORMAT_CYCLONEDX;
+        }
+
+        // Unknown format - explicitly return null
+        return null;
+    }
+
     /**
      * Transform SPDX checksums to CycloneDX hashes.
      *
@@ -202,25 +284,5 @@ class HashTransformer
             'BLAKE3',
             'MD5'
         ];
-    }
-
-    /**
-     * Get the source format this transformer handles.
-     *
-     * @return string The format (e.g., 'SPDX')
-     */
-    public function getSourceFormat(): string
-    {
-        return FormatEnum::FORMAT_SPDX;
-    }
-
-    /**
-     * Get the target format for this transformer.
-     *
-     * @return string The target format (e.g., 'CycloneDX')
-     */
-    public function getTargetFormat(): string
-    {
-        return FormatEnum::FORMAT_CYCLONEDX;
     }
 }

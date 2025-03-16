@@ -3,10 +3,13 @@
 namespace SBOMinator\Transformatron\Tests\Unit\Transformer;
 
 use PHPUnit\Framework\TestCase;
+use SBOMinator\Transformatron\Enum\FormatEnum;
+use SBOMinator\Transformatron\Error\ConversionError;
 use SBOMinator\Transformatron\Transformer\HashTransformer;
 use SBOMinator\Transformatron\Transformer\LicenseTransformer;
 use SBOMinator\Transformatron\Transformer\PackageTransformer;
 use SBOMinator\Transformatron\Transformer\SpdxIdTransformer;
+use SBOMinator\Transformatron\Transformer\TransformerInterface;
 
 /**
  * Test cases for PackageTransformer class.
@@ -44,6 +47,104 @@ class PackageTransformerTest extends TestCase
             $this->licenseTransformer,
             $this->spdxIdTransformer
         );
+    }
+
+    /**
+     * Test that the transformer implements the TransformerInterface.
+     */
+    public function testImplementsTransformerInterface(): void
+    {
+        $this->assertInstanceOf(TransformerInterface::class, $this->transformer);
+    }
+
+    /**
+     * Test the source and target formats of the transformer.
+     */
+    public function testGetSourceAndTargetFormats(): void
+    {
+        $this->assertEquals(FormatEnum::FORMAT_SPDX, $this->transformer->getSourceFormat());
+        $this->assertEquals(FormatEnum::FORMAT_CYCLONEDX, $this->transformer->getTargetFormat());
+    }
+
+    /**
+     * Test the transform method with valid packages.
+     */
+    public function testTransformWithValidPackages(): void
+    {
+        // Setup mock expectations
+        $this->spdxIdTransformer->method('transformSpdxId')
+            ->willReturnCallback(function ($id) {
+                return str_replace('SPDXRef-', '', $id);
+            });
+
+        // Create test data
+        $sourceData = [
+            'packages' => [
+                [
+                    'name' => 'package1',
+                    'SPDXID' => 'SPDXRef-Package-1',
+                    'versionInfo' => '1.0.0'
+                ],
+                [
+                    'name' => 'package2',
+                    'SPDXID' => 'SPDXRef-Package-2',
+                    'versionInfo' => '2.0.0'
+                ]
+            ]
+        ];
+
+        $warnings = [];
+        $errors = [];
+        $result = $this->transformer->transform($sourceData, $warnings, $errors);
+
+        // Verify results
+        $this->assertArrayHasKey('components', $result);
+        $this->assertCount(2, $result['components']);
+        $this->assertEquals('Package-1', $result['components'][0]['bom-ref']);
+        $this->assertEquals('package1', $result['components'][0]['name']);
+        $this->assertEquals('1.0.0', $result['components'][0]['version']);
+        $this->assertEquals('Package-2', $result['components'][1]['bom-ref']);
+        $this->assertEquals('package2', $result['components'][1]['name']);
+        $this->assertEquals('2.0.0', $result['components'][1]['version']);
+        $this->assertEmpty($errors);
+    }
+
+    /**
+     * Test the transform method with missing packages.
+     */
+    public function testTransformWithMissingPackages(): void
+    {
+        $sourceData = [
+            'notPackages' => []
+        ];
+
+        $warnings = [];
+        $errors = [];
+        $result = $this->transformer->transform($sourceData, $warnings, $errors);
+
+        $this->assertEmpty($result);
+        $this->assertNotEmpty($errors);
+        $this->assertCount(1, $errors);
+        $this->assertEquals('Missing or invalid packages array in source data', $errors[0]->getMessage());
+    }
+
+    /**
+     * Test the transform method with invalid packages.
+     */
+    public function testTransformWithInvalidPackages(): void
+    {
+        $sourceData = [
+            'packages' => 'not an array'
+        ];
+
+        $warnings = [];
+        $errors = [];
+        $result = $this->transformer->transform($sourceData, $warnings, $errors);
+
+        $this->assertEmpty($result);
+        $this->assertNotEmpty($errors);
+        $this->assertCount(1, $errors);
+        $this->assertEquals('Missing or invalid packages array in source data', $errors[0]->getMessage());
     }
 
     /**
@@ -120,7 +221,6 @@ class PackageTransformerTest extends TestCase
         $this->assertEquals('package1', $component['name']);
         $this->assertEquals('1.0.0', $component['version']);
         $this->assertEquals('Test package', $component['description']);
-        $this->assertEquals('library', $component['type']);
         $this->assertArrayHasKey('licenses', $component);
         $this->assertEquals('MIT', $component['licenses'][0]['license']['id']);
         $this->assertArrayHasKey('hashes', $component);

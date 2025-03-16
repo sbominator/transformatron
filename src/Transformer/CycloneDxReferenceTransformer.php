@@ -3,15 +3,87 @@
 namespace SBOMinator\Transformatron\Transformer;
 
 use SBOMinator\Transformatron\Enum\FormatEnum;
-use SBOMinator\Transformatron\Enum\VersionEnum;
+use SBOMinator\Transformatron\Error\ConversionError;
 
 /**
  * Transformer for CycloneDX reference identifiers.
  *
  * Handles transformation of CycloneDX identifiers to SPDX format.
  */
-class CycloneDxReferenceTransformer
+class CycloneDxReferenceTransformer implements TransformerInterface
 {
+    /**
+     * Transform CycloneDX reference data to SPDX format.
+     *
+     * @param array<string, mixed> $sourceData Source data to transform
+     * @param array<string> &$warnings Array to collect warnings during transformation
+     * @param array<ConversionError> &$errors Array to collect errors during transformation
+     * @return array<string, mixed> Transformed data
+     */
+    public function transform(array $sourceData, array &$warnings, array &$errors): array
+    {
+        $transformedData = [];
+
+        // Handle spec version transformation
+        if (isset($sourceData['specVersion'])) {
+            try {
+                $transformedData['spdxVersion'] = $this->transformSpecVersion($sourceData['specVersion']);
+            } catch (\Exception $e) {
+                $errors[] = ConversionError::createError(
+                    "Error transforming spec version: {$e->getMessage()}",
+                    'CycloneDxReferenceTransformer',
+                    ['specVersion' => $sourceData['specVersion']],
+                    'spec_version_transform_error',
+                    $e
+                );
+            }
+        }
+
+        // Handle serial number transformation
+        if (isset($sourceData['serialNumber'])) {
+            try {
+                $transformedData['SPDXID'] = $this->transformSerialNumber($sourceData['serialNumber']);
+            } catch (\Exception $e) {
+                $errors[] = ConversionError::createError(
+                    "Error transforming serial number: {$e->getMessage()}",
+                    'CycloneDxReferenceTransformer',
+                    ['serialNumber' => $sourceData['serialNumber']],
+                    'serial_number_transform_error',
+                    $e
+                );
+            }
+        }
+
+        // Collect warnings for unknown fields
+        $knownFields = ['specVersion', 'serialNumber'];
+        $unknownFields = array_diff(array_keys($sourceData), $knownFields);
+        foreach ($unknownFields as $field) {
+            $warnings[] = "Unknown or unmapped CycloneDX reference field: {$field}";
+        }
+
+        return $transformedData;
+    }
+
+    /**
+     * Get the source format this transformer handles.
+     *
+     * @return string The source format (e.g., 'CycloneDX')
+     */
+    public function getSourceFormat(): string
+    {
+        return FormatEnum::FORMAT_CYCLONEDX;
+    }
+
+    /**
+     * Get the target format for this transformer.
+     *
+     * @return string The target format (e.g., 'SPDX')
+     */
+    public function getTargetFormat(): string
+    {
+        return FormatEnum::FORMAT_SPDX;
+    }
+
     /**
      * Transform CycloneDX spec version to SPDX version.
      *
@@ -24,7 +96,7 @@ class CycloneDxReferenceTransformer
             '1.4' => 'SPDX-2.3',
             '1.3' => 'SPDX-2.2',
             '1.2' => 'SPDX-2.1',
-            default => VersionEnum::SPDX_VERSION, // Default to latest
+            default => 'SPDX-2.3', // Default to latest
         };
     }
 
@@ -36,25 +108,18 @@ class CycloneDxReferenceTransformer
      */
     public function transformSerialNumber(string $serialNumber): string
     {
-        // Add "SPDXRef-" prefix if not present
-        return strpos($serialNumber, 'SPDXRef-') === 0
-            ? $serialNumber
-            : 'SPDXRef-' . $serialNumber;
-    }
+        // If already an SPDX ID, just return
+        if (strpos($serialNumber, 'SPDXRef-') === 0) {
+            return $serialNumber;
+        }
 
-    /**
-     * Generate a unique CycloneDX serial number.
-     *
-     * @param string $prefix Optional prefix for the serial number
-     * @return string The generated serial number
-     */
-    public function generateSerialNumber(string $prefix = ''): string
-    {
-        $sanitizedPrefix = $prefix
-            ? preg_replace('/[^a-zA-Z0-9.\-]/', '-', $prefix) . '-'
-            : '';
+        // For UUID serial numbers, remove the 'urn:uuid:' prefix
+        $serialNumber = preg_replace('/^urn:uuid:/', '', $serialNumber);
 
-        return $sanitizedPrefix . 'urn:uuid:' . $this->generateUuid();
+        // Sanitize the serial number to be a valid SPDX ID
+        $sanitized = preg_replace('/[^a-zA-Z0-9.\-]/', '-', $serialNumber);
+
+        return 'SPDXRef-' . $sanitized;
     }
 
     /**
@@ -77,34 +142,23 @@ class CycloneDxReferenceTransformer
      */
     public function formatAsReference(string $input): string
     {
-        // If already a valid reference, return as-is
-        if ($this->isValidReference($input)) {
-            // We also need to replace invalid characters with dashes
-            return preg_replace('/[^a-zA-Z0-9.\-]/', '-', $input);
-        }
-
         // Replace spaces and invalid characters with dashes
         return preg_replace('/[^a-zA-Z0-9.\-]/', '-', $input);
     }
 
     /**
-     * Get the format this transformer handles.
+     * Generate a unique CycloneDX serial number.
      *
-     * @return string The format (e.g., 'CycloneDX')
+     * @param string $prefix Optional prefix for the serial number
+     * @return string The generated serial number
      */
-    public function getSourceFormat(): string
+    public function generateSerialNumber(string $prefix = ''): string
     {
-        return FormatEnum::FORMAT_CYCLONEDX;
-    }
+        $sanitizedPrefix = $prefix
+            ? preg_replace('/[^a-zA-Z0-9.\-]/', '-', $prefix) . '-'
+            : '';
 
-    /**
-     * Get the target format for this transformer.
-     *
-     * @return string The target format (e.g., 'SPDX')
-     */
-    public function getTargetFormat(): string
-    {
-        return FormatEnum::FORMAT_SPDX;
+        return $sanitizedPrefix . 'urn:uuid:' . $this->generateUuid();
     }
 
     /**

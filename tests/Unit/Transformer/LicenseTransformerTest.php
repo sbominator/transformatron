@@ -3,7 +3,10 @@
 namespace SBOMinator\Transformatron\Tests\Unit\Transformer;
 
 use PHPUnit\Framework\TestCase;
+use SBOMinator\Transformatron\Enum\FormatEnum;
+use SBOMinator\Transformatron\Error\ConversionError;
 use SBOMinator\Transformatron\Transformer\LicenseTransformer;
+use SBOMinator\Transformatron\Transformer\TransformerInterface;
 
 /**
  * Test cases for LicenseTransformer class.
@@ -18,6 +21,190 @@ class LicenseTransformerTest extends TestCase
     protected function setUp(): void
     {
         $this->transformer = new LicenseTransformer();
+    }
+
+    /**
+     * Test that the transformer implements the TransformerInterface.
+     */
+    public function testImplementsTransformerInterface(): void
+    {
+        $this->assertInstanceOf(TransformerInterface::class, $this->transformer);
+    }
+
+    /**
+     * Test the source and target formats of the transformer.
+     */
+    public function testGetSourceAndTargetFormats(): void
+    {
+        $this->assertEquals(FormatEnum::FORMAT_SPDX, $this->transformer->getSourceFormat());
+        $this->assertEquals(FormatEnum::FORMAT_CYCLONEDX, $this->transformer->getTargetFormat());
+    }
+
+    /**
+     * Test the transform method with SPDX to CycloneDX conversion.
+     */
+    public function testTransformSpdxToCycloneDx(): void
+    {
+        $sourceData = ['license' => 'MIT'];
+
+        $warnings = [];
+        $errors = [];
+        $result = $this->transformer->transform($sourceData, $warnings, $errors);
+
+        $this->assertCount(1, $result);
+        $this->assertArrayHasKey('license', $result[0]);
+        $this->assertArrayHasKey('id', $result[0]['license']);
+        $this->assertEquals('MIT', $result[0]['license']['id']);
+        $this->assertEmpty($warnings);
+        $this->assertEmpty($errors);
+    }
+
+    /**
+     * Test the transform method with SPDX complex license expression.
+     */
+    public function testTransformSpdxComplexExpression(): void
+    {
+        $sourceData = ['license' => '(MIT OR Apache-2.0) AND GPL-2.0-only'];
+
+        $warnings = [];
+        $errors = [];
+        $result = $this->transformer->transform($sourceData, $warnings, $errors);
+
+        $this->assertCount(1, $result);
+        $this->assertArrayHasKey('license', $result[0]);
+        $this->assertArrayHasKey('expression', $result[0]['license']);
+        $this->assertEquals('(MIT OR Apache-2.0) AND GPL-2.0-only', $result[0]['license']['expression']);
+        $this->assertEmpty($warnings);
+        $this->assertEmpty($errors);
+    }
+
+    /**
+     * Test the transform method with CycloneDX to SPDX conversion.
+     */
+    public function testTransformCycloneDxToSpdx(): void
+    {
+        $sourceData = [
+            [
+                'license' => [
+                    'id' => 'MIT'
+                ]
+            ]
+        ];
+
+        $warnings = [];
+        $errors = [];
+        $result = $this->transformer->transform($sourceData, $warnings, $errors);
+
+        $this->assertArrayHasKey('license', $result);
+        $this->assertEquals('MIT', $result['license']);
+        $this->assertEmpty($warnings);
+        $this->assertEmpty($errors);
+    }
+
+    /**
+     * Test the transform method with multiple CycloneDX licenses.
+     */
+    public function testTransformMultipleCycloneDxLicenses(): void
+    {
+        $sourceData = [
+            [
+                'license' => [
+                    'id' => 'MIT'
+                ]
+            ],
+            [
+                'license' => [
+                    'id' => 'Apache-2.0'
+                ]
+            ]
+        ];
+
+        $warnings = [];
+        $errors = [];
+        $result = $this->transformer->transform($sourceData, $warnings, $errors);
+
+        $this->assertArrayHasKey('license', $result);
+        $this->assertEquals('(MIT OR Apache-2.0)', $result['license']);
+        $this->assertEmpty($warnings);
+        $this->assertEmpty($errors);
+    }
+
+    /**
+     * Test the transform method with CycloneDX license expression.
+     */
+    public function testTransformCycloneDxWithExpression(): void
+    {
+        $sourceData = [
+            [
+                'license' => [
+                    'expression' => '(MIT OR Apache-2.0) AND GPL-2.0-only'
+                ]
+            ]
+        ];
+
+        $warnings = [];
+        $errors = [];
+        $result = $this->transformer->transform($sourceData, $warnings, $errors);
+
+        $this->assertArrayHasKey('license', $result);
+        $this->assertEquals('(MIT OR Apache-2.0) AND GPL-2.0-only', $result['license']);
+        $this->assertEmpty($warnings);
+        $this->assertEmpty($errors);
+    }
+
+    /**
+     * Test the transform method with empty data.
+     */
+    public function testTransformWithEmptyData(): void
+    {
+        $sourceData = [];
+
+        $warnings = [];
+        $errors = [];
+        $result = $this->transformer->transform($sourceData, $warnings, $errors);
+
+        $this->assertEmpty($result);
+        $this->assertNotEmpty($errors);
+        $this->assertCount(1, $errors);
+        $this->assertEquals('Unknown license data format', $errors[0]->getMessage());
+    }
+
+    /**
+     * Test the transform method with invalid SPDX data.
+     */
+    public function testTransformWithInvalidSpdxData(): void
+    {
+        $sourceData = ['not_a_license' => 'value'];
+
+        $warnings = [];
+        $errors = [];
+        $result = $this->transformer->transform($sourceData, $warnings, $errors);
+
+        $this->assertEmpty($result);
+        $this->assertNotEmpty($errors);
+        $this->assertCount(1, $errors);
+        $this->assertEquals('Unknown license data format', $errors[0]->getMessage());
+    }
+
+    /**
+     * Test the transform method with invalid CycloneDX data.
+     */
+    public function testTransformWithInvalidCycloneDxData(): void
+    {
+        $sourceData = [
+            [
+                'not_a_license' => 'value'
+            ]
+        ];
+
+        $warnings = [];
+        $errors = [];
+        $result = $this->transformer->transform($sourceData, $warnings, $errors);
+
+        $this->assertEmpty($result);
+        $this->assertNotEmpty($errors);
+        $this->assertCount(1, $errors);
+        $this->assertEquals('Unknown license data format', $errors[0]->getMessage());
     }
 
     /**
@@ -318,13 +505,14 @@ class LicenseTransformerTest extends TestCase
     }
 
     /**
-     * Test common SPDX license IDs.
+     * Test getCommonSpdxLicenseIds method.
      */
     public function testGetCommonSpdxLicenseIds(): void
     {
         $licenses = $this->transformer->getCommonSpdxLicenseIds();
 
         $this->assertNotEmpty($licenses);
+        $this->assertIsArray($licenses);
         $this->assertContains('MIT', $licenses);
         $this->assertContains('Apache-2.0', $licenses);
         $this->assertContains('GPL-3.0-only', $licenses);

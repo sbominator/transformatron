@@ -3,117 +3,262 @@
 namespace SBOMinator\Transformatron\Tests\Unit\Transformer;
 
 use PHPUnit\Framework\TestCase;
-use SBOMinator\Transformatron\Transformer\CycloneDxReferenceTransformer;
+use SBOMinator\Transformatron\Enum\FormatEnum;
+use SBOMinator\Transformatron\Error\ConversionError;
+use SBOMinator\Transformatron\Transformer\CycloneDxMetadataTransformer;
+use SBOMinator\Transformatron\Transformer\TransformerInterface;
 
 /**
- * Test cases for CycloneDxReferenceTransformer class.
+ * Test cases for CycloneDxMetadataTransformer class.
  */
-class CycloneDxReferenceTransformerTest extends TestCase
+class CycloneDxMetadataTransformerTest extends TestCase
 {
     /**
-     * @var CycloneDxReferenceTransformer
+     * @var CycloneDxMetadataTransformer
      */
-    private CycloneDxReferenceTransformer $transformer;
+    private CycloneDxMetadataTransformer $transformer;
 
     protected function setUp(): void
     {
-        $this->transformer = new CycloneDxReferenceTransformer();
+        $this->transformer = new CycloneDxMetadataTransformer();
     }
 
     /**
-     * Test transformSpecVersion with valid versions.
+     * Test that the transformer implements the TransformerInterface.
      */
-    public function testTransformSpecVersionWithValidVersions(): void
+    public function testImplementsTransformerInterface(): void
     {
-        $this->assertEquals('SPDX-2.3', $this->transformer->transformSpecVersion('1.4'));
-        $this->assertEquals('SPDX-2.2', $this->transformer->transformSpecVersion('1.3'));
-        $this->assertEquals('SPDX-2.1', $this->transformer->transformSpecVersion('1.2'));
+        $this->assertInstanceOf(TransformerInterface::class, $this->transformer);
     }
 
     /**
-     * Test transformSpecVersion with invalid version.
+     * Test the source and target formats of the transformer.
      */
-    public function testTransformSpecVersionWithInvalidVersion(): void
+    public function testGetSourceAndTargetFormats(): void
     {
-        // Should return default version when given an unrecognized version
-        $this->assertEquals('SPDX-2.3', $this->transformer->transformSpecVersion('INVALID-VERSION'));
+        $this->assertEquals(FormatEnum::FORMAT_CYCLONEDX, $this->transformer->getSourceFormat());
+        $this->assertEquals(FormatEnum::FORMAT_SPDX, $this->transformer->getTargetFormat());
     }
 
     /**
-     * Test transformSerialNumber with various inputs.
+     * Test the transform method with valid metadata.
      */
-    public function testTransformSerialNumber(): void
+    public function testTransformWithValidMetadata(): void
     {
-        // Test with no prefix
-        $this->assertEquals('SPDXRef-DOCUMENT', $this->transformer->transformSerialNumber('DOCUMENT'));
+        $sourceData = [
+            'metadata' => [
+                'timestamp' => '2023-01-15T12:03:28Z',
+                'tools' => [
+                    [
+                        'vendor' => 'Test',
+                        'name' => 'Generator',
+                        'version' => '1.0.0'
+                    ]
+                ],
+                'authors' => [
+                    [
+                        'name' => 'Jane Doe',
+                        'email' => 'jane.doe@example.com'
+                    ]
+                ],
+                'component' => [
+                    'name' => 'TestComponent',
+                    'version' => '1.0.0'
+                ]
+            ]
+        ];
 
-        // Test with SPDXRef- prefix already present
-        $this->assertEquals('SPDXRef-Package-1', $this->transformer->transformSerialNumber('SPDXRef-Package-1'));
+        $warnings = [];
+        $errors = [];
+        $result = $this->transformer->transform($sourceData, $warnings, $errors);
 
-        // Test with empty string
-        $this->assertEquals('SPDXRef-', $this->transformer->transformSerialNumber(''));
+        // Check result structure
+        $this->assertArrayHasKey('creationInfo', $result);
+        $this->assertEmpty($errors);
+        $this->assertEmpty($warnings);
+
+        // Check creationInfo fields
+        $creationInfo = $result['creationInfo'];
+        $this->assertEquals('2023-01-15T12:03:28Z', $creationInfo['created']);
+        $this->assertCount(2, $creationInfo['creators']);
+        $this->assertStringContainsString('Tool: TestGenerator-1.0.0', $creationInfo['creators'][0]);
+        $this->assertStringContainsString('Person: Jane Doe (jane.doe@example.com)', $creationInfo['creators'][1]);
+        $this->assertStringContainsString('SBOM for TestComponent version 1.0.0', $creationInfo['comment']);
     }
 
     /**
-     * Test generateSerialNumber without prefix.
+     * Test the transform method with missing metadata.
      */
-    public function testGenerateSerialNumberWithoutPrefix(): void
+    public function testTransformWithMissingMetadata(): void
     {
-        $serialNumber = $this->transformer->generateSerialNumber();
+        $sourceData = [
+            'notMetadata' => []
+        ];
 
-        // Check that serial number contains a UUID
-        $pattern = '/urn:uuid:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/';
-        $this->assertMatchesRegularExpression($pattern, $serialNumber);
+        $warnings = [];
+        $errors = [];
+        $result = $this->transformer->transform($sourceData, $warnings, $errors);
+
+        $this->assertEmpty($result);
+        $this->assertNotEmpty($errors);
+        $this->assertCount(1, $errors);
+        $this->assertEquals('Missing or invalid metadata in source data', $errors[0]->getMessage());
     }
 
     /**
-     * Test generateSerialNumber with prefix.
+     * Test the transform method with invalid metadata.
      */
-    public function testGenerateSerialNumberWithPrefix(): void
+    public function testTransformWithInvalidMetadata(): void
     {
-        $serialNumber = $this->transformer->generateSerialNumber('component-1');
+        $sourceData = [
+            'metadata' => 'not an array'
+        ];
 
-        // Check that serial number starts with the provided prefix
-        $this->assertStringStartsWith('component-1-', $serialNumber);
+        $warnings = [];
+        $errors = [];
+        $result = $this->transformer->transform($sourceData, $warnings, $errors);
 
-        // Check that serial number contains a UUID after the prefix
-        $pattern = '/component-1-urn:uuid:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/';
-        $this->assertMatchesRegularExpression($pattern, $serialNumber);
+        $this->assertEmpty($result);
+        $this->assertNotEmpty($errors);
+        $this->assertCount(1, $errors);
+        $this->assertEquals('Missing or invalid metadata in source data', $errors[0]->getMessage());
     }
 
     /**
-     * Test isValidReference with valid references.
+     * Test transformMetadata with complete metadata.
      */
-    public function testIsValidReferenceWithValidReferences(): void
+    public function testTransformMetadataWithCompleteData(): void
     {
-        $this->assertTrue($this->transformer->isValidReference('component-1'));
-        $this->assertTrue($this->transformer->isValidReference('pkg:npm/lodash@4.17.21'));
-        $this->assertTrue($this->transformer->isValidReference('urn:uuid:3e671687-395b-41f5-a30f-a58921a69b79'));
+        $metadata = [
+            'timestamp' => '2023-01-15T12:03:28Z',
+            'tools' => [
+                [
+                    'vendor' => 'Test',
+                    'name' => 'Generator',
+                    'version' => '1.0.0'
+                ]
+            ],
+            'authors' => [
+                [
+                    'name' => 'Jane Doe',
+                    'email' => 'jane.doe@example.com'
+                ]
+            ],
+            'component' => [
+                'name' => 'TestComponent',
+                'version' => '1.0.0'
+            ]
+        ];
+
+        $creationInfo = $this->transformer->transformMetadata($metadata);
+
+        // Check timestamp
+        $this->assertEquals('2023-01-15T12:03:28Z', $creationInfo['created']);
+
+        // Check creators
+        $this->assertCount(2, $creationInfo['creators']);
+        $this->assertEquals('Tool: TestGenerator-1.0.0', $creationInfo['creators'][0]);
+        $this->assertEquals('Person: Jane Doe (jane.doe@example.com)', $creationInfo['creators'][1]);
+
+        // Check component info in comment
+        $this->assertEquals('SBOM for TestComponent version 1.0.0', $creationInfo['comment']);
     }
 
     /**
-     * Test isValidReference with invalid references.
+     * Test transformMetadata with minimal metadata.
      */
-    public function testIsValidReferenceWithInvalidReferences(): void
+    public function testTransformMetadataWithMinimalData(): void
     {
-        $this->assertFalse($this->transformer->isValidReference('component 1')); // Contains space
+        $metadata = [
+            'timestamp' => '2023-01-15T12:03:28Z'
+        ];
+
+        $creationInfo = $this->transformer->transformMetadata($metadata);
+
+        // Check timestamp
+        $this->assertEquals('2023-01-15T12:03:28Z', $creationInfo['created']);
+
+        // Check default creator
+        $this->assertCount(1, $creationInfo['creators']);
+        $this->assertEquals('Tool: SBOMinator-Converter-1.0', $creationInfo['creators'][0]);
     }
 
     /**
-     * Test formatAsReference with various inputs.
+     * Test createDefaultCreationInfo method.
      */
-    public function testFormatAsReference(): void
+    public function testCreateDefaultCreationInfo(): void
     {
-        // Already valid reference
-        $this->assertEquals('component-1', $this->transformer->formatAsReference('component-1'));
+        $creationInfo = $this->transformer->createDefaultCreationInfo();
 
-        // Contains spaces
-        $this->assertEquals('component-1', $this->transformer->formatAsReference('component 1'));
+        $this->assertArrayHasKey('created', $creationInfo);
+        $this->assertArrayHasKey('creators', $creationInfo);
+        $this->assertCount(1, $creationInfo['creators']);
+        $this->assertEquals('Tool: SBOMinator-Converter-1.0', $creationInfo['creators'][0]);
+    }
 
-        // Contains invalid characters
-        $this->assertEquals('component-1', $this->transformer->formatAsReference('component-1'));
+    /**
+     * Test converting tools to creators.
+     */
+    public function testConvertToolsToCreators(): void
+    {
+        $tools = [
+            [
+                'vendor' => 'Test',
+                'name' => 'Tool1',
+                'version' => '1.0'
+            ],
+            [
+                'name' => 'Tool2'
+                // Missing vendor and version
+            ],
+            [
+                'vendor' => 'Another',
+                // Missing name
+                'version' => '2.0'
+            ]
+        ];
 
-        // Empty string
-        $this->assertEquals('', $this->transformer->formatAsReference(''));
+        // Use reflection to access private method
+        $method = new \ReflectionMethod(CycloneDxMetadataTransformer::class, 'convertToolsToCreators');
+        $method->setAccessible(true);
+
+        $creators = $method->invoke($this->transformer, $tools);
+
+        // Should have 2 valid creators (one for Tool1, one for Tool2)
+        $this->assertCount(2, $creators);
+        $this->assertEquals('Tool: TestTool1-1.0', $creators[0]);
+        $this->assertEquals('Tool: Tool2-1.0', $creators[1]);
+    }
+
+    /**
+     * Test converting authors to creators.
+     */
+    public function testConvertAuthorsToCreators(): void
+    {
+        $authors = [
+            [
+                'name' => 'Jane Doe',
+                'email' => 'jane@example.com'
+            ],
+            [
+                'name' => 'John Smith'
+                // Missing email
+            ],
+            [
+                // Missing name
+                'email' => 'unknown@example.com'
+            ]
+        ];
+
+        // Use reflection to access private method
+        $method = new \ReflectionMethod(CycloneDxMetadataTransformer::class, 'convertAuthorsToCreators');
+        $method->setAccessible(true);
+
+        $creators = $method->invoke($this->transformer, $authors);
+
+        // Should have 2 valid creators (Jane and John)
+        $this->assertCount(2, $creators);
+        $this->assertEquals('Person: Jane Doe (jane@example.com)', $creators[0]);
+        $this->assertEquals('Person: John Smith', $creators[1]);
     }
 }

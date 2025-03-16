@@ -3,14 +3,65 @@
 namespace SBOMinator\Transformatron\Transformer;
 
 use SBOMinator\Transformatron\Enum\FormatEnum;
+use SBOMinator\Transformatron\Error\ConversionError;
 
 /**
  * Transformer for SPDX metadata.
  *
  * Handles transformation of SPDX metadata to CycloneDX format.
  */
-class SpdxMetadataTransformer
+class SpdxMetadataTransformer implements TransformerInterface
 {
+    /**
+     * Get the source format this transformer handles.
+     *
+     * @return string The source format (e.g., 'SPDX')
+     */
+    public function getSourceFormat(): string
+    {
+        return FormatEnum::FORMAT_SPDX;
+    }
+
+    /**
+     * Get the target format for this transformer.
+     *
+     * @return string The target format (e.g., 'CycloneDX')
+     */
+    public function getTargetFormat(): string
+    {
+        return FormatEnum::FORMAT_CYCLONEDX;
+    }
+
+    /**
+     * Transform SPDX creation info to CycloneDX metadata.
+     *
+     * @param array<string, mixed> $sourceData Source data containing SPDX creation info
+     * @param array<string> &$warnings Array to collect warnings during transformation
+     * @param array<ConversionError> &$errors Array to collect errors during transformation
+     * @return array<string, mixed> The transformed CycloneDX metadata
+     */
+    public function transform(array $sourceData, array &$warnings, array &$errors): array
+    {
+        if (!isset($sourceData['creationInfo'])) {
+            $warnings[] = "Missing creationInfo in SPDX data, using default metadata";
+            return ['metadata' => $this->createDefaultMetadata()];
+        }
+
+        try {
+            $metadata = $this->transformCreationInfo($sourceData['creationInfo']);
+            return ['metadata' => $metadata];
+        } catch (\Exception $e) {
+            $errors[] = ConversionError::createError(
+                "Error transforming SPDX creation info: " . $e->getMessage(),
+                "SpdxMetadataTransformer",
+                ['creationInfo' => isset($sourceData['creationInfo']) ? 'present' : 'missing'],
+                'metadata_transform_error',
+                $e
+            );
+            return ['metadata' => $this->createDefaultMetadata()];
+        }
+    }
+
     /**
      * Transform SPDX creation info to CycloneDX metadata.
      *
@@ -172,25 +223,5 @@ class SpdxMetadataTransformer
         ];
 
         return $metadata;
-    }
-
-    /**
-     * Get the format this transformer handles.
-     *
-     * @return string The format (e.g., 'SPDX')
-     */
-    public function getSourceFormat(): string
-    {
-        return FormatEnum::FORMAT_SPDX;
-    }
-
-    /**
-     * Get the target format for this transformer.
-     *
-     * @return string The target format (e.g., 'CycloneDX')
-     */
-    public function getTargetFormat(): string
-    {
-        return FormatEnum::FORMAT_CYCLONEDX;
     }
 }

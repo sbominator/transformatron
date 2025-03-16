@@ -4,13 +4,14 @@ namespace SBOMinator\Transformatron\Transformer;
 
 use SBOMinator\Transformatron\Config\PackageComponentMappingConfig;
 use SBOMinator\Transformatron\Enum\FormatEnum;
+use SBOMinator\Transformatron\Error\ConversionError;
 
 /**
  * Transformer for SPDX packages.
  *
  * Handles transformation of SPDX packages to CycloneDX components.
  */
-class PackageTransformer
+class PackageTransformer implements TransformerInterface
 {
     /**
      * @var HashTransformer
@@ -42,6 +43,61 @@ class PackageTransformer
         $this->hashTransformer = $hashTransformer;
         $this->licenseTransformer = $licenseTransformer;
         $this->spdxIdTransformer = $spdxIdTransformer;
+    }
+
+    /**
+     * Get the source format this transformer handles.
+     *
+     * @return string The format (e.g., 'SPDX')
+     */
+    public function getSourceFormat(): string
+    {
+        return FormatEnum::FORMAT_SPDX;
+    }
+
+    /**
+     * Get the target format for this transformer.
+     *
+     * @return string The target format (e.g., 'CycloneDX')
+     */
+    public function getTargetFormat(): string
+    {
+        return FormatEnum::FORMAT_CYCLONEDX;
+    }
+
+    /**
+     * Transform SPDX packages to CycloneDX components.
+     *
+     * @param array<string, mixed> $sourceData Source data containing SPDX packages
+     * @param array<string> &$warnings Array to collect warnings during transformation
+     * @param array<ConversionError> &$errors Array to collect errors during transformation
+     * @return array<string, mixed> The transformed CycloneDX components data
+     */
+    public function transform(array $sourceData, array &$warnings, array &$errors): array
+    {
+        if (!isset($sourceData['packages']) || !is_array($sourceData['packages'])) {
+            $errors[] = ConversionError::createError(
+                'Missing or invalid packages array in source data',
+                'PackageTransformer',
+                ['sourceData' => $sourceData],
+                'invalid_packages_data'
+            );
+            return [];
+        }
+
+        try {
+            $components = $this->transformPackagesToComponents($sourceData['packages'], $warnings);
+            return ['components' => $components];
+        } catch (\Exception $e) {
+            $errors[] = ConversionError::createError(
+                "Error transforming packages to components: " . $e->getMessage(),
+                "PackageTransformer",
+                ['package_count' => count($sourceData['packages'])],
+                'package_transform_error',
+                $e
+            );
+            return [];
+        }
     }
 
     /**
@@ -83,6 +139,49 @@ class PackageTransformer
         }
 
         return $component;
+    }
+
+    /**
+     * Determine component type from package information.
+     *
+     * @param array<string, mixed> $package SPDX package
+     * @return string Component type
+     */
+    protected function determineComponentType(array $package): string
+    {
+        // Default type is library
+        $type = 'library';
+
+        // Try to determine from package information
+        if (isset($package['comment']) && stripos($package['comment'], 'application') !== false) {
+            $type = 'application';
+        } elseif (isset($package['name'])) {
+            // Try to determine from package name patterns
+            $name = strtolower($package['name']);
+            if (
+                str_ends_with($name, '-app') ||
+                str_ends_with($name, '-application') ||
+                str_contains($name, 'app-') ||
+                str_contains($name, 'application-')
+            ) {
+                $type = 'application';
+            } elseif (
+                str_ends_with($name, '-fw') ||
+                str_ends_with($name, '-framework') ||
+                str_contains($name, 'framework-')
+            ) {
+                $type = 'framework';
+            } elseif (
+                str_ends_with($name, '-os') ||
+                str_contains($name, 'linux') ||
+                str_contains($name, 'windows') ||
+                str_contains($name, 'macos')
+            ) {
+                $type = 'operating-system';
+            }
+        }
+
+        return $type;
     }
 
     /**
@@ -177,49 +276,6 @@ class PackageTransformer
     }
 
     /**
-     * Determine component type from package information.
-     *
-     * @param array<string, mixed> $package SPDX package
-     * @return string Component type
-     */
-    protected function determineComponentType(array $package): string
-    {
-        // Default type is library
-        $type = 'library';
-
-        // Try to determine from package information
-        if (isset($package['comment']) && stripos($package['comment'], 'application') !== false) {
-            $type = 'application';
-        } elseif (isset($package['name'])) {
-            // Try to determine from package name patterns
-            $name = strtolower($package['name']);
-            if (
-                str_ends_with($name, '-app') ||
-                str_ends_with($name, '-application') ||
-                str_contains($name, 'app-') ||
-                str_contains($name, 'application-')
-            ) {
-                $type = 'application';
-            } elseif (
-                str_ends_with($name, '-fw') ||
-                str_ends_with($name, '-framework') ||
-                str_contains($name, 'framework-')
-            ) {
-                $type = 'framework';
-            } elseif (
-                str_ends_with($name, '-os') ||
-                str_contains($name, 'linux') ||
-                str_contains($name, 'windows') ||
-                str_contains($name, 'macos')
-            ) {
-                $type = 'operating-system';
-            }
-        }
-
-        return $type;
-    }
-
-    /**
      * Add package verification code as a hash.
      *
      * @param array<string, mixed> $component Component to modify
@@ -294,25 +350,5 @@ class PackageTransformer
         foreach ($unknownFields as $field) {
             $warnings[] = "Unknown or unmapped package field: {$field}";
         }
-    }
-
-    /**
-     * Get the source format this transformer handles.
-     *
-     * @return string The format (e.g., 'SPDX')
-     */
-    public function getSourceFormat(): string
-    {
-        return FormatEnum::FORMAT_SPDX;
-    }
-
-    /**
-     * Get the target format for this transformer.
-     *
-     * @return string The target format (e.g., 'CycloneDX')
-     */
-    public function getTargetFormat(): string
-    {
-        return FormatEnum::FORMAT_CYCLONEDX;
     }
 }

@@ -4,6 +4,7 @@ namespace SBOMinator\Transformatron\Transformer;
 
 use SBOMinator\Transformatron\Enum\FormatEnum;
 use SBOMinator\Transformatron\Enum\RelationshipTypeEnum;
+use SBOMinator\Transformatron\Error\ConversionError;
 
 /**
  * Transformer for SPDX relationships.
@@ -11,7 +12,7 @@ use SBOMinator\Transformatron\Enum\RelationshipTypeEnum;
  * Handles transformation of SPDX relationships to CycloneDX dependencies format.
  * Supports various relationship types beyond simple dependencies.
  */
-class RelationshipTransformer
+class RelationshipTransformer implements TransformerInterface
 {
     /**
      * @var SpdxIdTransformer
@@ -26,6 +27,67 @@ class RelationshipTransformer
     public function __construct(SpdxIdTransformer $spdxIdTransformer)
     {
         $this->spdxIdTransformer = $spdxIdTransformer;
+    }
+
+    /**
+     * Get the source format this transformer handles.
+     *
+     * @return string The format (e.g., 'SPDX')
+     */
+    public function getSourceFormat(): string
+    {
+        return FormatEnum::FORMAT_SPDX;
+    }
+
+    /**
+     * Get the target format for this transformer.
+     *
+     * @return string The target format (e.g., 'CycloneDX')
+     */
+    public function getTargetFormat(): string
+    {
+        return FormatEnum::FORMAT_CYCLONEDX;
+    }
+
+    /**
+     * Transform SPDX relationships to CycloneDX dependencies.
+     *
+     * @param array<string, mixed> $sourceData Source data containing SPDX relationships
+     * @param array<string> &$warnings Array to collect warnings during transformation
+     * @param array<ConversionError> &$errors Array to collect errors during transformation
+     * @return array<string, mixed> The transformed CycloneDX dependencies data
+     */
+    public function transform(array $sourceData, array &$warnings, array &$errors): array
+    {
+        if (!isset($sourceData['relationships']) || !is_array($sourceData['relationships'])) {
+            $errors[] = ConversionError::createError(
+                'Missing or invalid relationships array in source data',
+                'RelationshipTransformer',
+                ['sourceData' => $sourceData],
+                'invalid_relationships_data'
+            );
+            return [];
+        }
+
+        try {
+            // Check for circular dependencies before transformation
+            $circularDependencyWarnings = $this->checkForCircularDependencies($sourceData['relationships']);
+            if (!empty($circularDependencyWarnings)) {
+                $warnings = array_merge($warnings, $circularDependencyWarnings);
+            }
+
+            $dependencies = $this->transformRelationshipsToDependencies($sourceData['relationships'], $warnings);
+            return ['dependencies' => $dependencies];
+        } catch (\Exception $e) {
+            $errors[] = ConversionError::createError(
+                "Error transforming relationships to dependencies: " . $e->getMessage(),
+                "RelationshipTransformer",
+                ['relationship_count' => count($sourceData['relationships'])],
+                'relationship_transform_error',
+                $e
+            );
+            return [];
+        }
     }
 
     /**
@@ -253,25 +315,5 @@ class RelationshipTransformer
         }
 
         return false;
-    }
-
-    /**
-     * Get the source format this transformer handles.
-     *
-     * @return string The format (e.g., 'SPDX')
-     */
-    public function getSourceFormat(): string
-    {
-        return FormatEnum::FORMAT_SPDX;
-    }
-
-    /**
-     * Get the target format for this transformer.
-     *
-     * @return string The target format (e.g., 'CycloneDX')
-     */
-    public function getTargetFormat(): string
-    {
-        return FormatEnum::FORMAT_CYCLONEDX;
     }
 }

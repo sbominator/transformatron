@@ -156,34 +156,9 @@ class ConverterFactory
 
         // Create appropriate converter type with dependencies
         if ($converterClass === CycloneDxToSpdxConverter::class) {
-            $metadataTransformer = $this->getOrCreateService(CycloneDxMetadataTransformer::class);
-            $referenceTransformer = $this->getOrCreateService(CycloneDxReferenceTransformer::class);
-
-            $componentTransformer = new ComponentTransformer(
-                $hashTransformer,
-                $licenseTransformer,
-                $spdxIdTransformer
-            );
-
-            $dependencyTransformer = new DependencyTransformer($spdxIdTransformer);
-
             $converter = new CycloneDxToSpdxConverter();
-            $this->setTransformers($converter, $metadataTransformer, $componentTransformer, $dependencyTransformer, $referenceTransformer);
-
         } elseif ($converterClass === SpdxToCycloneDxConverter::class) {
-            $metadataTransformer = $this->getOrCreateService(SpdxMetadataTransformer::class);
-
-            $packageTransformer = new PackageTransformer(
-                $hashTransformer,
-                $licenseTransformer,
-                $spdxIdTransformer
-            );
-
-            $relationshipTransformer = new RelationshipTransformer($spdxIdTransformer);
-
             $converter = new SpdxToCycloneDxConverter();
-            $this->setTransformers($converter, $metadataTransformer, $packageTransformer, $relationshipTransformer, $spdxIdTransformer);
-
         } else {
             throw new \InvalidArgumentException("Unsupported converter class: {$converterClass}");
         }
@@ -208,34 +183,6 @@ class ConverterFactory
         }
 
         return $this->services[$class];
-    }
-
-    /**
-     * Set transformer dependencies on converters using reflection.
-     *
-     * This method uses reflection to inject dependencies into converters
-     * that may have private or protected properties for transformers.
-     *
-     * @param AbstractConverter $converter The converter to modify
-     * @param mixed ...$transformers The transformers to inject
-     */
-    private function setTransformers(AbstractConverter $converter, ...$transformers): void
-    {
-        $reflection = new \ReflectionClass($converter);
-
-        foreach ($transformers as $transformer) {
-            $transformerClass = get_class($transformer);
-            $shortName = (new \ReflectionClass($transformerClass))->getShortName();
-
-            // Convert from CamelCase to camelCase for property names
-            $propertyName = lcfirst($shortName);
-
-            if ($reflection->hasProperty($propertyName)) {
-                $property = $reflection->getProperty($propertyName);
-                $property->setAccessible(true);
-                $property->setValue($converter, $transformer);
-            }
-        }
     }
 
     /**

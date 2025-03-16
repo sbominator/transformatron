@@ -34,18 +34,18 @@ abstract class AbstractConverter implements ConverterInterface
             // Decode the input JSON
             try {
                 $sourceData = JsonUtil::decodeJson($json);
-            } catch (ValidationException $e) {
+            } catch (ValidationException $exception) {
                 // Critical error - can't even parse the JSON
                 $error = ConversionError::createCritical(
-                    $e->getMessage(),
+                    $exception->getMessage(),
                     'JsonParser',
                     ['original_json' => substr($json, 0, 100) . (strlen($json) > 100 ? '...' : '')],
                     'json_parse_error',
-                    $e
+                    $exception
                 );
 
                 throw new ConversionException(
-                    $e->getMessage(),
+                    $exception->getMessage(),
                     $this->getSourceFormat(),
                     $this->getTargetFormat()
                 );
@@ -180,6 +180,38 @@ abstract class AbstractConverter implements ConverterInterface
      * @return array<string, mixed> Updated target data with defaults
      */
     abstract protected function ensureRequiredDefaultData(array $targetData): array;
+
+    /**
+     * Transforms a field value using a transformer.
+     *
+     * @param mixed $value Value to transform
+     * @param string $fieldName Field name for context
+     * @param TransformerInterface $transformer The transformer to use
+     * @param array<string> &$warnings Warnings array for collecting warnings
+     * @param array<ConversionError> &$errors Errors array for collecting errors
+     * @return mixed Transformed value
+     */
+    protected function transformFieldWithTransformer(
+        $value,
+        string $fieldName,
+        TransformerInterface $transformer,
+        array &$warnings,
+        array &$errors
+    ) {
+        try {
+            $transformedData = $transformer->transform(['data' => $value], $warnings, $errors);
+            return $transformedData['data'] ?? $value;
+        } catch (\Exception $e) {
+            $errors[] = ConversionError::createError(
+                "Error transforming field '{$fieldName}': " . $e->getMessage(),
+                get_class($transformer),
+                ['original_value' => is_scalar($value) ? $value : gettype($value)],
+                'transform_error',
+                $e
+            );
+            return $value;
+        }
+    }
 
     /**
      * Transform field value using specified transform method.

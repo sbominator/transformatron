@@ -3,10 +3,13 @@
 namespace SBOMinator\Transformatron\Tests\Unit\Transformer;
 
 use PHPUnit\Framework\TestCase;
+use SBOMinator\Transformatron\Enum\FormatEnum;
+use SBOMinator\Transformatron\Error\ConversionError;
 use SBOMinator\Transformatron\Transformer\ComponentTransformer;
 use SBOMinator\Transformatron\Transformer\HashTransformer;
 use SBOMinator\Transformatron\Transformer\LicenseTransformer;
 use SBOMinator\Transformatron\Transformer\SpdxIdTransformer;
+use SBOMinator\Transformatron\Transformer\TransformerInterface;
 
 /**
  * Test cases for ComponentTransformer class.
@@ -44,6 +47,104 @@ class ComponentTransformerTest extends TestCase
             $this->licenseTransformer,
             $this->spdxIdTransformer
         );
+    }
+
+    /**
+     * Test that the transformer implements the TransformerInterface.
+     */
+    public function testImplementsTransformerInterface(): void
+    {
+        $this->assertInstanceOf(TransformerInterface::class, $this->transformer);
+    }
+
+    /**
+     * Test the source and target formats of the transformer.
+     */
+    public function testGetSourceAndTargetFormats(): void
+    {
+        $this->assertEquals(FormatEnum::FORMAT_CYCLONEDX, $this->transformer->getSourceFormat());
+        $this->assertEquals(FormatEnum::FORMAT_SPDX, $this->transformer->getTargetFormat());
+    }
+
+    /**
+     * Test the transform method with valid components.
+     */
+    public function testTransformWithValidComponents(): void
+    {
+        // Setup mock expectations
+        $this->spdxIdTransformer->method('formatAsSpdxId')
+            ->willReturnCallback(function ($id) {
+                return 'SPDXRef-' . $id;
+            });
+
+        // Create test data
+        $sourceData = [
+            'components' => [
+                [
+                    'name' => 'component1',
+                    'bom-ref' => 'component-1',
+                    'version' => '1.0.0'
+                ],
+                [
+                    'name' => 'component2',
+                    'bom-ref' => 'component-2',
+                    'version' => '2.0.0'
+                ]
+            ]
+        ];
+
+        $warnings = [];
+        $errors = [];
+        $result = $this->transformer->transform($sourceData, $warnings, $errors);
+
+        // Verify results
+        $this->assertArrayHasKey('packages', $result);
+        $this->assertCount(2, $result['packages']);
+        $this->assertEquals('SPDXRef-component-1', $result['packages'][0]['SPDXID']);
+        $this->assertEquals('component1', $result['packages'][0]['name']);
+        $this->assertEquals('1.0.0', $result['packages'][0]['versionInfo']);
+        $this->assertEquals('SPDXRef-component-2', $result['packages'][1]['SPDXID']);
+        $this->assertEquals('component2', $result['packages'][1]['name']);
+        $this->assertEquals('2.0.0', $result['packages'][1]['versionInfo']);
+        $this->assertEmpty($errors);
+    }
+
+    /**
+     * Test the transform method with missing components.
+     */
+    public function testTransformWithMissingComponents(): void
+    {
+        $sourceData = [
+            'notComponents' => []
+        ];
+
+        $warnings = [];
+        $errors = [];
+        $result = $this->transformer->transform($sourceData, $warnings, $errors);
+
+        $this->assertEmpty($result);
+        $this->assertNotEmpty($errors);
+        $this->assertCount(1, $errors);
+        $this->assertEquals('Missing or invalid components array in source data', $errors[0]->getMessage());
+    }
+
+    /**
+     * Test the transform method with invalid components.
+     */
+    public function testTransformWithInvalidComponents(): void
+    {
+        $sourceData = [
+            'components' => 'not an array'
+        ];
+
+        $warnings = [];
+        $errors = [];
+        $result = $this->transformer->transform($sourceData, $warnings, $errors);
+
+        $this->assertEmpty($result);
+        $this->assertNotEmpty($errors);
+        $this->assertCount(1, $errors);
+        $this->assertEquals('Missing or invalid components array in source data', $errors[0]->getMessage());
     }
 
     /**
@@ -163,7 +264,7 @@ class ComponentTransformerTest extends TestCase
     }
 
     /**
-     * Test getBomRefFromComponent method.
+     * Test getting a bom-ref from a component.
      */
     public function testGetBomRefFromComponent(): void
     {
@@ -197,7 +298,7 @@ class ComponentTransformerTest extends TestCase
     }
 
     /**
-     * Test extractNameFromPurl method.
+     * Test extract name from purl.
      */
     public function testExtractNameFromPurl(): void
     {
