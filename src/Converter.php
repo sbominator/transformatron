@@ -131,9 +131,9 @@ class Converter
     /**
      * Constructor.
      */
-    public function __construct()
+    public function __construct(?ConverterFactory $converterFactory = null)
     {
-        $this->converterFactory = new ConverterFactory();
+        $this->converterFactory = $converterFactory ?? new ConverterFactory();
     }
 
     /**
