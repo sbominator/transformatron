@@ -37,30 +37,6 @@ class ConverterTest extends TestCase
     }
 
     /**
-     * Test options can be set and retrieved
-     */
-    public function testOptions(): void
-    {
-        $converter = new Converter();
-
-        // Default options should be set
-        $defaultOptions = $converter->getOptions();
-        $this->assertArrayHasKey('stream_threshold', $defaultOptions);
-
-        // Set custom options
-        $customOptions = [
-            'stream_threshold' => 10 * 1024 * 1024,
-            'custom_option' => 'value'
-        ];
-
-        $converter->setOptions($customOptions);
-        $options = $converter->getOptions();
-
-        $this->assertEquals(10 * 1024 * 1024, $options['stream_threshold']);
-        $this->assertEquals('value', $options['custom_option']);
-    }
-
-    /**
      * Test that the detectFormat method works correctly
      */
     public function testDetectFormat(): void
@@ -231,45 +207,5 @@ class ConverterTest extends TestCase
         } catch (ValidationException $e) {
             $this->assertStringContainsString('Invalid JSON', $e->getMessage());
         }
-    }
-
-    /**
-     * Test converting a large input
-     */
-    public function testConvertLargeInput(): void
-    {
-        $converter = new Converter([
-            'stream_threshold' => 100 // Set a small threshold for testing
-        ]);
-
-        // Create a larger JSON string
-        $largeData = [
-            'spdxVersion' => 'SPDX-2.3',
-            'dataLicense' => 'CC0-1.0',
-            'SPDXID' => 'SPDXRef-DOCUMENT',
-            'name' => 'large-document',
-            'documentNamespace' => 'https://example.com/large',
-            'packages' => []
-        ];
-
-        // Add some packages to make it larger
-        for ($i = 0; $i < 10; $i++) {
-            $largeData['packages'][] = [
-                'name' => "package-$i",
-                'SPDXID' => "SPDXRef-Package-$i",
-                'versionInfo' => "1.0.$i",
-                'downloadLocation' => "https://example.com/package-$i",
-                'licenseConcluded' => 'MIT',
-                'description' => str_repeat("Long description for package $i. ", 20)
-            ];
-        }
-
-        $largeJson = json_encode($largeData);
-
-        // This should now use the streaming conversion path
-        $result = $converter->convertSpdxToCyclonedx($largeJson);
-
-        $this->assertInstanceOf(ConversionResult::class, $result);
-        $this->assertEquals(Converter::FORMAT_CYCLONEDX, $result->getFormat());
     }
 }

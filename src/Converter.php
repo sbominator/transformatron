@@ -122,35 +122,18 @@ class Converter
     ];
 
     /**
-     * Default converter options
+     * Factory for creating SBOM converters.
      *
-     * @var array<string, mixed>
-     */
-    private array $defaultOptions = [
-        'stream_threshold' => 5 * 1024 * 1024, // 5MB
-        'add_describes_relationships' => true,
-        'strict_validation' => false
-    ];
-
-    /**
      * @var ConverterFactory
      */
     private ConverterFactory $converterFactory;
 
     /**
-     * @var array<string, mixed>
-     */
-    private array $options;
-
-    /**
      * Constructor.
-     *
-     * @param array<string, mixed> $options Configuration options for the converter
      */
-    public function __construct(array $options = [])
+    public function __construct()
     {
         $this->converterFactory = new ConverterFactory();
-        $this->options = array_merge($this->defaultOptions, $options);
     }
 
     /**
@@ -219,39 +202,6 @@ class Converter
      */
     public function convert(string $json, string $targetFormat, ?string $sourceFormat = null): ConversionResult
     {
-        if ($this->shouldUseStreamingConverter($json)) {
-            return $this->convertWithStreaming($json, $sourceFormat, $targetFormat);
-        }
-
-        $converter = $this->createConverter($json, $sourceFormat, $targetFormat);
-        return $converter->convert($json);
-    }
-
-    /**
-     * Determine if the streaming converter should be used based on input size.
-     *
-     * @param string $json The JSON content to check
-     * @return bool True if streaming should be used
-     */
-    private function shouldUseStreamingConverter(string $json): bool
-    {
-        return strlen($json) > $this->options['stream_threshold'];
-    }
-
-    /**
-     * Convert using streaming for large inputs.
-     *
-     * @param string $json The JSON content to convert
-     * @param string $targetFormat The target format
-     * @param string|null $sourceFormat The source format (or null for auto-detection)
-     * @return ConversionResult The conversion result
-     * @throws ValidationException If validation fails
-     * @throws ConversionException If conversion fails
-     */
-    private function convertWithStreaming(string $json, string $targetFormat, ?string $sourceFormat = null): ConversionResult
-    {
-        // For now, we'll use the regular converter even for large files
-        // In the future, this can be extended to use a streaming approach
         $converter = $this->createConverter($json, $targetFormat, $sourceFormat);
         return $converter->convert($json);
     }
@@ -272,28 +222,6 @@ class Converter
         }
 
         return $this->converterFactory->createConverterFromJson($json, $targetFormat);
-    }
-
-    /**
-     * Set converter options.
-     *
-     * @param array<string, mixed> $options Options to set
-     * @return self
-     */
-    public function setOptions(array $options): self
-    {
-        $this->options = array_merge($this->options, $options);
-        return $this;
-    }
-
-    /**
-     * Get current options.
-     *
-     * @return array<string, mixed> Current options
-     */
-    public function getOptions(): array
-    {
-        return $this->options;
     }
 
     /**
