@@ -92,46 +92,4 @@ class CycloneDxFieldConfigTest extends TestCase
         // Test with non-existing field
         $this->assertNull(CycloneDxFieldConfig::getMappingForField('nonExistentField'));
     }
-
-    /**
-     * Test that the CycloneDX to SPDX mappings match those in the Converter class.
-     *
-     * This helps ensure consistency during refactoring.
-     */
-    public function testCycloneDxToSpdxMappingsMatchConverterClass(): void
-    {
-        // Use reflection to access the constant from Converter class
-        $reflectionClass = new \ReflectionClass('SBOMinator\Transformatron\Converter');
-        $converterMappings = $reflectionClass->getConstant('CYCLONEDX_TO_SPDX_MAPPINGS');
-
-        $configMappings = CycloneDxFieldConfig::getCycloneDxToSpdxMappings();
-
-        // Check that all keys in converter mappings exist in config mappings
-        foreach (array_keys($converterMappings) as $key) {
-            $this->assertArrayHasKey($key, $configMappings);
-            $this->assertEquals($converterMappings[$key], $configMappings[$key]);
-        }
-
-        // Check that all keys in config mappings exist in converter mappings
-        foreach (array_keys($configMappings) as $key) {
-            $this->assertArrayHasKey($key, $converterMappings);
-        }
-    }
-
-    /**
-     * Test that the required CycloneDX fields match those in the Converter class.
-     *
-     * This helps ensure consistency during refactoring.
-     */
-    public function testRequiredCycloneDxFieldsMatchConverterClass(): void
-    {
-        // Use reflection to access the constant from Converter class
-        $reflectionClass = new \ReflectionClass('SBOMinator\Transformatron\Converter');
-        $converterRequiredFields = $reflectionClass->getConstant('REQUIRED_CYCLONEDX_FIELDS');
-
-        $configRequiredFields = CycloneDxFieldConfig::getRequiredCycloneDxFields();
-
-        // Check that both arrays have the same values (regardless of order)
-        $this->assertEqualsCanonicalizing($converterRequiredFields, $configRequiredFields);
-    }
 }

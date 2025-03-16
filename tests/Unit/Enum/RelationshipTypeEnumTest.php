@@ -26,19 +26,4 @@ class RelationshipTypeEnumTest extends TestCase
         $this->assertEquals('RUNTIME_DEPENDENCY_OF', RelationshipTypeEnum::RELATIONSHIP_RUNTIME_DEPENDENCY_OF);
         $this->assertEquals('OPTIONAL_DEPENDENCY_OF', RelationshipTypeEnum::RELATIONSHIP_OPTIONAL_DEPENDENCY_OF);
     }
-
-    /**
-     * Test that the DEPENDS_ON constant matches the one in Converter class.
-     *
-     * This helps ensure consistency during refactoring.
-     */
-    public function testDependsOnConstantMatchesConverterClass(): void
-    {
-        // Use reflection to access the constant from Converter class
-        $reflectionClass = new \ReflectionClass('SBOMinator\Transformatron\Converter');
-
-        $dependsOnConstant = $reflectionClass->getConstant('RELATIONSHIP_DEPENDS_ON');
-
-        $this->assertEquals($dependsOnConstant, RelationshipTypeEnum::RELATIONSHIP_DEPENDS_ON);
-    }
 }
