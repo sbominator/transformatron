@@ -220,3 +220,7 @@ Additionally, the `ConversionResult` class collects warnings and non-critical er
 ## License
 
 MIT License
+
+## Contributing
+
+please see [CONTRIBUTING.md](CONTRIBUTING.md) for more information.
