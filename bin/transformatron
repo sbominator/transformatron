@@ -4,8 +4,12 @@ use SBOMinator\Transformatron\Converter;
 use SBOMinator\Transformatron\Exception\ConversionException;
 use SBOMinator\Transformatron\Exception\ValidationException;
 
-const USAGE = <<<'END'
-	Usage: transformatron <path-to-sbom-file> [--format=spdx|cyclonedx] [--target=spdx|cyclonedx]
+require __DIR__ . '/../vendor/autoload.php';
+
+$cmd = array_shift($argv);
+
+$usage = <<<"END"
+	Usage: $cmd <path-to-sbom-file> [--format=spdx|cyclonedx] [--target=spdx|cyclonedx]
 	Options:
 		--format=spdx|cyclonedx  Specify the format of the input SBOM file
 		--target=spdx|cyclonedx  Specify the format of the output SBOM file
@@ -13,9 +17,6 @@ const USAGE = <<<'END'
 		--version                Display the version of this tool
 	END;
 
-require __DIR__ . '/../vendor/autoload.php';
-
-$cmd = array_shift($argv);
 $format = 'auto';
 $target = 'auto';
 $path = null;
@@ -26,7 +27,7 @@ foreach ($argv as $arg) {
 			exit(0);
 
 		case $arg === '--help' || $arg === '-h':
-			echo USAGE;
+			echo $usage;
 			exit(0);
 
 		case str_starts_with($arg, '--format='):
@@ -66,7 +67,7 @@ foreach ($argv as $arg) {
 }
 
 if (empty($path)) {
-	echo USAGE;
+	echo $usage;
 	exit(1);
 }
 
@@ -93,4 +94,3 @@ try {
 } catch (ValidationException | ConversionException $e) {
     fprintf(STDERR, "Error: " . $e->getMessage() . "\n");
 }
-
