@@ -1,0 +1,96 @@
+#!/usr/bin/env php
+<?php
+use SBOMinator\Transformatron\Converter;
+use SBOMinator\Transformatron\Exception\ConversionException;
+use SBOMinator\Transformatron\Exception\ValidationException;
+
+const USAGE = <<<'END'
+	Usage: transformatron <path-to-sbom-file> [--format=spdx|cyclonedx] [--target=spdx|cyclonedx]
+	Options:
+		--format=spdx|cyclonedx  Specify the format of the input SBOM file
+		--target=spdx|cyclonedx  Specify the format of the output SBOM file
+		--help                   Display this help message
+		--version                Display the version of this tool
+	END;
+
+require __DIR__ . '/../vendor/autoload.php';
+
+$cmd = array_shift($argv);
+$format = 'auto';
+$target = 'auto';
+$path = null;
+foreach ($argv as $arg) {
+	switch (true) {
+		case ($arg === '--version' || $arg === '-v'):
+			echo "Transformatron version 1.0.0\n";
+			exit(0);
+
+		case $arg === '--help' || $arg === '-h':
+			echo USAGE;
+			exit(0);
+
+		case str_starts_with($arg, '--format='):
+			$format = substr($arg, 9);
+			if ($format !== 'spdx' && $format !== 'cyclonedx') {
+				echo "Error: Invalid format specified\n";
+				exit(1);
+			}
+			$format = $format === 'spdx' ? Converter::FORMAT_SPDX : Converter::FORMAT_CYCLONEDX;
+			break;
+
+		case str_starts_with($arg, '--target='):
+			$target = substr($arg, 9);
+			if ($target !== 'spdx' && $target !== 'cyclonedx') {
+				echo "Error: Invalid target specified\n";
+				exit(1);
+			}
+			$target = $target === 'spdx' ? Converter::FORMAT_SPDX : Converter::FORMAT_CYCLONEDX;
+			break;
+
+		case '--' === $arg:
+			$path = array_shift($argv);
+			break 2;
+
+		case '-' === $arg:
+			$path = 'php://stdin';
+			break 2;
+
+		case str_starts_with($arg, '-'):
+			echo "Error: Invalid option: $arg\n";
+			exit(1);
+
+		default:
+			$path = $arg;
+			break 2;
+	}
+}
+
+if (empty($path)) {
+	echo USAGE;
+	exit(1);
+}
+
+// Read the JSON from the provided path
+$json = file_get_contents($path);
+
+// Detect the format
+$converter = new Converter();
+if ($format === 'auto') {
+	$format = $converter->detectFormat($json);
+	if (!$format) {
+		fprintf(STDERR, "Detected format: " . $format . "\n");
+	}
+}
+if ($target === 'auto') {
+	$target = $format === Converter::FORMAT_SPDX ? Converter::FORMAT_CYCLONEDX : Converter::FORMAT_SPDX;
+}
+
+// Convert to target format using auto-detection
+try {
+    // $targetFormat = Converter::FORMAT_CYCLONEDX; // or Converter::FORMAT_SPDX
+    $result = $converter->convert($json, $target, $format);
+	echo $result->getContent();
+} catch (ValidationException | ConversionException $e) {
+    fprintf(STDERR, "Error: " . $e->getMessage() . "\n");
+}
+
