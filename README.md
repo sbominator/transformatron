@@ -71,6 +71,29 @@ try {
 }
 ```
 
+## CLI Usage
+
+Transformatron can be used directly on the CLI:
+
+```sh
+$ bin/transformatron path/to/spdx.json
+{
+    "bomFormat": "CycloneDX",
+    "specVersion": "1.4",
+    ...
+```
+
+The CLI tool supports the ability to automatically detect source and target versions, but they can also be specified manually:
+
+```
+Usage: transformatron <path-to-sbom-file> [--format=spdx|cyclonedx] [--target=spdx|cyclonedx]
+Options:
+    --format=spdx|cyclonedx  Specify the format of the input SBOM file
+    --target=spdx|cyclonedx  Specify the format of the output SBOM file
+    --help                   Display this help message
+    --version                Display the version of this tool
+```
+
 ## Advanced Usage
 
 ### Auto-detecting Format

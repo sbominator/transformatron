@@ -22,5 +22,8 @@
     },
     "scripts": {
         "test": "phpunit"
-    }
+    },
+    "bin": [
+        "bin/transformatron"
+    ]
 }
