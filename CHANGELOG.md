@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/sbominator/transformatron/compare/v0.1.0...v0.2.0) (2025-03-17)
+
+
+### Features
+
+* add CLI command ([74deff4](https://github.com/sbominator/transformatron/commit/74deff417a9267f4a7607e49c0dcb34e4f7f2704))
+
 ## 0.1.0 (2025-03-16)
 
 
